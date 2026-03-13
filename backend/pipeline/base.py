@@ -38,14 +38,23 @@ async def finish_pipeline_run(
     error_message: str | None = None,
     metadata: dict | None = None,
 ):
-    """Update pipeline run with completion status."""
-    run.status = status
-    run.finished_at = _utcnow_db_naive()
-    run.records_processed = records_processed
-    run.records_inserted = records_inserted
-    run.records_updated = records_updated
-    run.error_message = error_message
-    run.metadata_json = metadata
+    """Update pipeline run with completion status.
+
+    The run object can be detached if callers start/finish in different DB sessions.
+    Re-attach via primary key so status updates are always persisted.
+    """
+    persisted = run
+    run_id = getattr(run, "id", None)
+    if run_id is not None:
+        persisted = await session.get(PipelineRun, run_id) or run
+
+    persisted.status = status
+    persisted.finished_at = _utcnow_db_naive()
+    persisted.records_processed = records_processed
+    persisted.records_inserted = records_inserted
+    persisted.records_updated = records_updated
+    persisted.error_message = error_message
+    persisted.metadata_json = metadata
     await session.flush()
 
 

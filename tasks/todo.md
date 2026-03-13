@@ -36,3 +36,17 @@
 - Completed full audit and delivered findings in `tasks/full_audit_report.md`.
 - Focused recommendations prioritize stability, graceful degradation, and simplification over feature expansion.
 - Excluded Stage 2 redesign details except where shared architecture/coupling impacts baseline reliability.
+
+## Plan — Data readiness + response model hardening
+- [x] Audit pipeline run persistence and completion semantics.
+- [x] Align doctor readiness outputs to required-vs-optional dependencies.
+- [x] Trace census catchment fallback path and improve lookup + logging.
+- [x] Replace dict assignments for typed response fields with Pydantic model instances.
+- [x] Add regression tests for tracking, readiness, lookup normalization, and typed nesting.
+
+## Review notes — Data readiness + response model hardening
+- Fixed detached pipeline-run completion updates and removed ingest flows that created extra completion runs.
+- Updated doctor/readiness to report `readiness_status` (`ready`, `ready_with_fallbacks`, `not_ready`) while keeping strict blockers for required baselines.
+- Corrected pipeline-status tracking names for HUD (`hud_lihtc_property`, `hud_lihtc_tenant`, `hud_qct_dda`) and expanded diagnostics.
+- Improved census catchment observability and county fallback normalization for 3-digit vs 5-digit FIPS variants.
+- Converted nested reliability metadata assignment to typed schema models and added tests.

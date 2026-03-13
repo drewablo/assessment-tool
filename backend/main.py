@@ -28,7 +28,12 @@ from models.schemas import (
     CompareAnalysisSummary,
     DataFreshnessMetadata,
     DataFreshnessSource,
+    DataDependencyStatus,
     DecisionPathwayRecommendation,
+    ExportReadiness,
+    ConfidenceSummary,
+    FallbackSummary,
+    SectionExplanation,
     PartnerPathAssessment,
     PortfolioWorkspaceCreateRequest,
     PortfolioWorkspaceResponse,
@@ -76,10 +81,13 @@ PIPELINE_FRESHNESS_TARGET_HOURS = {
 
 
 
-def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str], bool]:
+def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str], bool, str]:
     """Build actionable DB-readiness diagnostics for operators."""
     diagnostics: list[str] = []
     blocking_diagnostics: list[str] = []
+
+    required_pipelines = {"census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"}
+    optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda"}
 
     table_expectations = {
         "census_tracts": "census_acs",
@@ -111,26 +119,31 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
             "Housing baseline remains available; QCT/DDA policy context will be skipped."
         )
 
-    for name, info in pipelines.items():
+    for name in sorted(required_pipelines.union(optional_pipelines)):
+        info = pipelines.get(name) or {}
         freshness = info.get("freshness_status")
         last_success = info.get("last_success")
         last_failure = (info.get("last_failure") or {}).get("error_message")
 
         if not last_success:
-            blocking_diagnostics.append(f"Pipeline '{name}' has never completed successfully.")
+            target = blocking_diagnostics if name in required_pipelines else diagnostics
+            target.append(f"Pipeline '{name}' has never completed successfully.")
         elif freshness == "stale":
-            blocking_diagnostics.append(
+            target = blocking_diagnostics if name in required_pipelines else diagnostics
+            target.append(
                 f"Pipeline '{name}' is stale (freshness_status=stale). Trigger a refresh run."
             )
 
         if last_failure:
-            blocking_diagnostics.append(
+            target = blocking_diagnostics if name in required_pipelines else diagnostics
+            target.append(
                 f"Pipeline '{name}' has recent failure: {str(last_failure)[:200]}"
             )
 
     all_diagnostics = [*blocking_diagnostics, *diagnostics]
     db_ready_for_analysis = len(blocking_diagnostics) == 0
-    return all_diagnostics, db_ready_for_analysis
+    readiness_status = "ready" if not all_diagnostics else ("ready_with_fallbacks" if db_ready_for_analysis else "not_ready")
+    return all_diagnostics, db_ready_for_analysis, readiness_status
 
 
 
@@ -344,11 +357,11 @@ async def _build_data_freshness_metadata() -> DataFreshnessMetadata:
 def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, dependency_counts: dict | None, fallback_notes: list[str], strict_blockers: list[str]) -> AnalysisResponse:
     result.run_mode = run_mode
     result.catchment_mode = result.catchment_type
-    result.data_dependencies = summarize_dependencies(dependency_counts)
-    result.fallback_summary = {
-        "used": bool(fallback_notes),
-        "notes": fallback_notes,
-    }
+    result.data_dependencies = [DataDependencyStatus.model_validate(row) for row in summarize_dependencies(dependency_counts)]
+    result.fallback_summary = FallbackSummary(
+        used=bool(fallback_notes),
+        notes=fallback_notes,
+    )
 
     confidence_level = (result.demographics.data_confidence or "medium").lower()
     contributors = [
@@ -359,13 +372,13 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
     if strict_blockers:
         confidence_level = "low"
         contributors.append("strict_mode_blockers_present")
-    result.confidence_summary = {
-        "level": confidence_level if confidence_level in {"high", "medium", "low"} else "medium",
-        "contributors": contributors,
-    }
+    result.confidence_summary = ConfidenceSummary(
+        level=confidence_level if confidence_level in {"high", "medium", "low"} else "medium",
+        contributors=contributors,
+    )
     confidence_level_final = result.confidence_summary.level if hasattr(result.confidence_summary, "level") else "medium"
 
-    export_reasons = [row["dataset"] for row in result.data_dependencies if row["export_blocking_in_strict"] and not row["available"]]
+    export_reasons = [row.dataset for row in result.data_dependencies if row.export_blocking_in_strict and not row.available]
     ready = len(export_reasons) == 0 and (confidence_level_final != "low")
     status = "ready" if ready else ("blocked" if run_mode == "db_strict" else "warning")
     reason_text = []
@@ -373,24 +386,24 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
         reason_text.append(f"Missing export-critical datasets: {', '.join(export_reasons)}")
     if confidence_level_final == "low":
         reason_text.append("Overall confidence is low; board-ready packaging should be treated as directional.")
-    result.export_readiness = {"ready": ready, "status": status, "reasons": reason_text}
+    result.export_readiness = ExportReadiness(ready=ready, status=status, reasons=reason_text)
 
-    missing = [row["dataset"] for row in result.data_dependencies if not row["available"]]
+    missing = [row.dataset for row in result.data_dependencies if not row.available]
     result.section_explanations = [
-        {
-            "section": "catchment",
-            "inputs_used": ["isochrone" if result.catchment_mode == "isochrone" else "radius"],
-            "inputs_missing": [],
-            "fallback_used": ["radius fallback"] if result.catchment_mode == "radius" else [],
-            "confidence_impact": "medium" if result.catchment_mode == "radius" else "low",
-        },
-        {
-            "section": "demographics_and_competition",
-            "inputs_used": ["census", "module_competitors"],
-            "inputs_missing": missing,
-            "fallback_used": fallback_notes,
-            "confidence_impact": "high" if fallback_notes else "low",
-        },
+        SectionExplanation(
+            section="catchment",
+            inputs_used=["isochrone" if result.catchment_mode == "isochrone" else "radius"],
+            inputs_missing=[],
+            fallback_used=["radius fallback"] if result.catchment_mode == "radius" else [],
+            confidence_impact="medium" if result.catchment_mode == "radius" else "low",
+        ),
+        SectionExplanation(
+            section="demographics_and_competition",
+            inputs_used=["census", "module_competitors"],
+            inputs_missing=missing,
+            fallback_used=fallback_notes,
+            confidence_impact="high" if fallback_notes else "low",
+        ),
     ]
 
     if strict_blockers:
@@ -1106,7 +1119,7 @@ async def pipeline_status():
 
         pipelines = {}
         stale_pipelines = []
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc"]:
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]:
             run = await get_latest_run(session, name)
             failed = await session.execute(
                 select(PipelineRun)
@@ -1164,7 +1177,7 @@ async def pipeline_status():
                 "error_message": row.error_message if row else None,
             }
 
-    diagnostics, db_ready_for_analysis = _build_pipeline_diagnostics(counts, pipelines)
+    diagnostics, db_ready_for_analysis, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
 
     return {
         "record_counts": counts,
@@ -1172,6 +1185,7 @@ async def pipeline_status():
         "stale_pipelines": stale_pipelines,
         "retry_recommended": len(stale_pipelines) > 0,
         "db_ready_for_analysis": db_ready_for_analysis,
+        "readiness_status": readiness_status,
         "diagnostics": diagnostics,
         "hud_ingest": hud_ingest,
     }
@@ -1499,7 +1513,15 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
         if (demographics or {}).get("tract_count", 0) == 0:
             logger.warning(
                 "USE_DB=true but no census tract rows were found for catchment; "
-                "falling back to live Census API for this request."
+                "falling back to live Census API for this request. "
+                "lookup_context=(lat=%.6f lon=%.6f radius_miles=%.2f catchment_type=%s state_fips=%s county_fips=%s used_county_fallback=%s)",
+                location["lat"],
+                location["lon"],
+                effective_radius,
+                catchment_type,
+                location["state_fips"],
+                location.get("county_fips"),
+                bool((demographics or {}).get("used_county_fallback")),
             )
             used_live_demographics_fallback = True
             fallback_notes.append("DB demographics unavailable; used live Census API fallback.")
