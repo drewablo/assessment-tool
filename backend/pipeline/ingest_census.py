@@ -7,11 +7,15 @@ Also downloads TIGER/Line tract shapefiles for boundaries and centroids.
 """
 
 import asyncio
+import io
 import logging
 import os
+import tempfile
+import zipfile
 import httpx
+import shapefile as pyshp
 from geoalchemy2.shape import from_shape
-from shapely.geometry import MultiPolygon, Point, shape
+from shapely.geometry import MultiPolygon, Point, Polygon, shape
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.connection import async_session_factory
@@ -90,19 +94,19 @@ ACS_VARIABLES = {
 # All 50 states + DC FIPS codes
 
 
-TIGER_TRACTS_ARCGIS = "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/4/query"
+# TIGER/Line shapefile download — static zip files, one per state.
+# Far more reliable than the ArcGIS REST API which frequently returns
+# HTML error pages or empty bodies under load.
+TIGER_SHAPEFILE_BASE = "https://www2.census.gov/geo/tiger/TIGER{year}/TRACT"
+TIGER_SHAPEFILE_VINTAGE = os.getenv("TIGER_VINTAGE", "2022")
 
-# Retry settings for Census API and TIGER ArcGIS
+# Retry settings for Census API and TIGER downloads
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16
 
 
 async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> dict | list:
-    """GET with exponential-backoff retry; returns parsed JSON.
-
-    Retries on: HTTP 429/5xx, timeouts, connection errors, and non-JSON
-    responses (ArcGIS commonly returns 200 with empty/HTML body on errors).
-    """
+    """GET with exponential-backoff retry; returns parsed JSON."""
     last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
@@ -116,35 +120,19 @@ async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, 
                 await asyncio.sleep(wait)
                 continue
             resp.raise_for_status()
-
-            # ArcGIS often returns HTTP 200 with an HTML error page or empty
-            # body instead of JSON.  Detect this and retry.
-            content_type = resp.headers.get("content-type", "")
-            if "html" in content_type and "json" not in content_type:
-                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
-                logger.warning(
-                    "%s: got HTML instead of JSON (content-type=%s) on attempt %d/%d; retrying in %ds",
-                    label, content_type, attempt + 1, _MAX_RETRIES + 1, wait,
-                )
-                await asyncio.sleep(wait)
-                continue
-
             try:
                 return resp.json()
             except ValueError as exc:
-                # Empty body or malformed JSON — retry
                 last_exc = exc
                 if attempt < _MAX_RETRIES:
                     wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
-                    body_preview = resp.text[:200] if resp.text else "(empty)"
                     logger.warning(
-                        "%s: JSON decode failed on attempt %d/%d (body: %s); retrying in %ds",
-                        label, attempt + 1, _MAX_RETRIES + 1, body_preview, wait,
+                        "%s: JSON decode failed on attempt %d/%d; retrying in %ds",
+                        label, attempt + 1, _MAX_RETRIES + 1, wait,
                     )
                     await asyncio.sleep(wait)
                 else:
                     raise
-
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
             last_exc = exc
             if attempt < _MAX_RETRIES:
@@ -159,67 +147,120 @@ async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, 
     raise last_exc or RuntimeError(f"{label}: exhausted retries")
 
 
-async def _fetch_tiger_geometries_for_state(client: httpx.AsyncClient, state_fips: str) -> list[dict]:
-    """Fetch TIGER tract geometries for a state from Census ArcGIS endpoint."""
-    offset = 0
-    page_size = 1000
-    features: list[dict] = []
-
-    while True:
-        params = {
-            "where": f"STATE='{state_fips}'",
-            "outFields": "GEOID",
-            "outSR": 4326,
-            "returnGeometry": "true",
-            "resultOffset": offset,
-            "resultRecordCount": page_size,
-            "f": "geojson",
-        }
+async def _retry_get_bytes(client: httpx.AsyncClient, url: str, *, timeout: float, label: str) -> bytes:
+    """GET with retry; returns raw response bytes (for zip downloads)."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
         try:
-            payload = await _retry_get_json(
-                client, TIGER_TRACTS_ARCGIS,
-                params=params, timeout=120.0,
-                label=f"TIGER state={state_fips} offset={offset}",
-            )
-        except Exception as exc:
-            logger.error("Failed to fetch TIGER geometries for state %s at offset %s after %d retries: %s",
-                         state_fips, offset, _MAX_RETRIES + 1, exc)
-            break
+            resp = await client.get(url, timeout=timeout, follow_redirects=True)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "%s: HTTP %d on attempt %d/%d; retrying in %ds",
+                    label, resp.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.content
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt < _MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "%s: %s on attempt %d/%d; retrying in %ds",
+                    label, type(exc).__name__, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise last_exc or RuntimeError(f"{label}: exhausted retries")
 
-        page = payload.get("features", []) if isinstance(payload, dict) else []
-        if not page:
-            break
-        features.extend(page)
-        if len(page) < page_size:
-            break
-        offset += page_size
 
-    return features
-
-
-def _feature_to_geometry(feature: dict):
-    geometry = feature.get("geometry")
-    if not geometry:
+def _shapefile_record_to_geometry(shp_shape) -> MultiPolygon | None:
+    """Convert a pyshp shape record to a Shapely MultiPolygon."""
+    if shp_shape.shapeType not in (pyshp.POLYGON, pyshp.POLYGONZ, pyshp.POLYGONM):
         return None
     try:
-        geom = shape(geometry)
+        geom = shape(shp_shape.__geo_interface__)
     except Exception:
         return None
-
     if geom.geom_type == "Polygon":
         geom = MultiPolygon([geom])
     if not isinstance(geom, MultiPolygon):
         return None
-
     return geom
 
 
-def _feature_geoid(feature: dict) -> str | None:
-    props = feature.get("properties", {})
-    geoid = props.get("GEOID") or props.get("geoid")
-    if geoid:
-        return str(geoid)
-    return None
+async def _fetch_tiger_geometries_for_state(client: httpx.AsyncClient, state_fips: str) -> dict[str, MultiPolygon]:
+    """Download TIGER/Line tract shapefile for a state and return {geoid: geometry}.
+
+    Downloads a ~2-10 MB zip file from the Census FTP site, extracts the
+    shapefile in memory, and reads tract boundaries using pyshp.
+    """
+    vintage = TIGER_SHAPEFILE_VINTAGE
+    filename = f"tl_{vintage}_{state_fips}_tract.zip"
+    url = f"{TIGER_SHAPEFILE_BASE.format(year=vintage)}/{filename}"
+
+    try:
+        zip_bytes = await _retry_get_bytes(
+            client, url, timeout=120.0,
+            label=f"TIGER shapefile state={state_fips}",
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to download TIGER shapefile for state %s (%s): %s",
+            state_fips, url, exc,
+        )
+        return {}
+
+    geom_by_geoid: dict[str, MultiPolygon] = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            # Find the .shp, .shx, and .dbf files inside the zip
+            shp_name = next((n for n in zf.namelist() if n.endswith(".shp")), None)
+            shx_name = next((n for n in zf.namelist() if n.endswith(".shx")), None)
+            dbf_name = next((n for n in zf.namelist() if n.endswith(".dbf")), None)
+
+            if not shp_name or not dbf_name:
+                logger.error("TIGER zip for state %s missing .shp or .dbf", state_fips)
+                return {}
+
+            shp_data = io.BytesIO(zf.read(shp_name))
+            shx_data = io.BytesIO(zf.read(shx_name)) if shx_name else None
+            dbf_data = io.BytesIO(zf.read(dbf_name))
+
+            reader = pyshp.Reader(shp=shp_data, shx=shx_data, dbf=dbf_data)
+            # Find the GEOID field index
+            field_names = [f[0] for f in reader.fields[1:]]  # skip DeletionFlag
+            geoid_idx = None
+            for candidate in ("GEOID", "GEOID20", "GEOID10"):
+                if candidate in field_names:
+                    geoid_idx = field_names.index(candidate)
+                    break
+
+            if geoid_idx is None:
+                logger.error(
+                    "TIGER shapefile for state %s has no GEOID field. Fields: %s",
+                    state_fips, field_names,
+                )
+                return {}
+
+            for sr in reader.iterShapeRecords():
+                geoid = str(sr.record[geoid_idx])
+                geom = _shapefile_record_to_geometry(sr.shape)
+                if geom is not None:
+                    geom_by_geoid[geoid] = geom
+
+    except (zipfile.BadZipFile, Exception) as exc:
+        logger.error("Failed to parse TIGER shapefile for state %s: %s", state_fips, exc)
+        return {}
+
+    logger.info(
+        "TIGER shapefile state=%s: %d tract geometries extracted (%.1f MB zip)",
+        state_fips, len(geom_by_geoid), len(zip_bytes) / 1_048_576,
+    )
+    return geom_by_geoid
 
 STATE_FIPS = [
     "01", "02", "04", "05", "06", "08", "09", "10", "11", "12",
@@ -391,14 +432,7 @@ async def _ingest_state(state_fips: str, vintage: str = "2022") -> tuple[int, in
     tract_dicts = [_transform_tract(row, vintage) for row in rows]
 
     async with httpx.AsyncClient() as client:
-        tiger_features = await _fetch_tiger_geometries_for_state(client, state_fips)
-
-    geom_by_geoid = {}
-    for feature in tiger_features:
-        geoid = _feature_geoid(feature)
-        geom = _feature_to_geometry(feature)
-        if geoid and geom is not None:
-            geom_by_geoid[geoid] = geom
+        geom_by_geoid = await _fetch_tiger_geometries_for_state(client, state_fips)
 
     geo_enriched = 0
     for tract in tract_dicts:
