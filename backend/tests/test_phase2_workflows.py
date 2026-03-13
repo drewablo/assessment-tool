@@ -5,21 +5,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from main import (
-    _facility_feasibility_adjustments,
-    _phase1_decision_pathway,
-    _PORTFOLIO_WORKSPACES,
-    add_portfolio_compare_snapshot,
-    create_portfolio_workspace,
-)
-from models.schemas import (
-    AnalysisRequest,
-    CompareAnalysisRequest,
-    CompareAnalysisResponse,
-    CompareAnalysisSummary,
-    FacilityProfile,
-    PortfolioWorkspaceCreateRequest,
-)
+from fastapi import HTTPException
+from main import _facility_feasibility_adjustments, _phase1_decision_pathway, create_portfolio_workspace
+from models.schemas import AnalysisRequest, FacilityProfile, PortfolioWorkspaceCreateRequest
 
 
 class _Score:
@@ -72,47 +60,16 @@ def test_phase1_pathway_includes_partner_assessment_when_partner_selected():
 
 
 @pytest.mark.asyncio
-async def test_portfolio_workspace_create_and_add_snapshot(monkeypatch):
-    _PORTFOLIO_WORKSPACES.clear()
+async def test_portfolio_workspace_requires_db(monkeypatch):
+    monkeypatch.setattr("main.USE_DB", False)
 
-    workspace = await create_portfolio_workspace(
-        PortfolioWorkspaceCreateRequest(
-            engagement_name="Springfield Portfolio",
-            client_name="St. Mark Province",
-            candidate_locations=[{"name": "North Site", "address": "1 Main St"}],
-            scenario_sets=[{"name": "Base", "assumptions": {"occupancy": 0.92}}],
-        )
-    )
-
-    async def fake_analyze_compare(_request):
-        return CompareAnalysisResponse(
-            school_name="North Site",
-            analysis_address="1 Main St",
-            compared_ministry_types=["schools", "housing"],
-            results=[
-                CompareAnalysisSummary(
-                    ministry_type="schools",
-                    overall_score=72,
-                    scenario_conservative=61,
-                    scenario_optimistic=82,
-                    recommendation="Proceed",
-                    recommendation_detail="Good fit",
-                    recommended_pathway="transform",
-                )
-            ],
+    with pytest.raises(HTTPException) as exc:
+        await create_portfolio_workspace(
+            PortfolioWorkspaceCreateRequest(
+                engagement_name="Springfield Portfolio",
+                client_name="St. Mark Province",
+            )
         )
 
-    monkeypatch.setattr("main.analyze_compare", fake_analyze_compare)
-
-    updated = await add_portfolio_compare_snapshot(
-        workspace.workspace_id,
-        CompareAnalysisRequest(
-            school_name="North Site",
-            address="1 Main St",
-            ministry_types=["schools", "housing"],
-        ),
-    )
-
-    assert updated.workspace_id == workspace.workspace_id
-    assert len(updated.compare_snapshots) == 1
-    assert updated.compare_snapshots[0].results[0].recommended_pathway == "transform"
+    assert exc.value.status_code == 501
+    assert "USE_DB=true" in str(exc.value.detail)

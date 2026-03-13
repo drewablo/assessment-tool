@@ -33,10 +33,7 @@ export async function runAnalysis(request: AnalysisRequest): Promise<AnalysisRes
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: "Unknown error" }));
-    const detail = error.detail;
-    const message = typeof detail === "object" ? detail.message : detail;
-    throw new Error(message || `API error: ${res.status}`);
+    throw await parseApiError(res, `API error: ${res.status}`);
   }
 
   return res.json();
@@ -50,7 +47,7 @@ export async function exportCsv(request: AnalysisRequest): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error("CSV export failed");
+    throw await parseApiError(res, "CSV export failed");
   }
 
   const blob = await res.blob();
@@ -70,7 +67,7 @@ export async function exportPdf(request: AnalysisRequest): Promise<void> {
   });
 
   if (!res.ok) {
-    throw new Error("PDF export failed");
+    throw await parseApiError(res, "PDF export failed");
   }
 
   const blob = await res.blob();
@@ -117,8 +114,7 @@ export async function extractSchoolAuditFinancials(files: File[]): Promise<Schoo
   });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ detail: "Audit extraction failed" }));
-    throw new Error(error.detail || "Audit extraction failed");
+    throw await parseApiError(res, "Audit extraction failed");
   }
 
   return res.json();
@@ -133,7 +129,7 @@ export async function exportBoardPack(request: AnalysisRequest): Promise<BoardPa
   });
 
   if (!res.ok) {
-    throw new Error("Board-pack export failed");
+    throw await parseApiError(res, "Board-pack export failed");
   }
 
   return res.json();

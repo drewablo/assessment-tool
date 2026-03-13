@@ -46,11 +46,15 @@ from api.isochrone import (
     GRADE_LEVEL_FALLBACK_RADIUS,
 )
 from api.school_stage2 import dedupe_year_rows, extract_audit_financials
+from services.dependency_policy import resolve_run_mode, summarize_dependencies, strict_mode_blockers
+from services.analysis_snapshot import snapshot_key, freeze_snapshot, thaw_snapshot
 
 # Database integration (v2)
 USE_DB = os.getenv("USE_DB", "").lower() in ("1", "true", "yes")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_TTL = int(os.getenv("ANALYSIS_CACHE_TTL", "86400"))  # 24 hours default
+DEFAULT_RUN_MODE = os.getenv("ANALYSIS_RUN_MODE", "db_with_fallback")
+SNAPSHOT_TTL = int(os.getenv("ANALYSIS_SNAPSHOT_TTL", "86400"))
 
 # Global Redis connection state
 _redis = None
@@ -335,6 +339,67 @@ async def _build_data_freshness_metadata() -> DataFreshnessMetadata:
             )
 
     return DataFreshnessMetadata(mode="db_precomputed", generated_at_utc=generated_at, sources=sources)
+
+
+def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, dependency_counts: dict | None, fallback_notes: list[str], strict_blockers: list[str]) -> AnalysisResponse:
+    result.run_mode = run_mode
+    result.catchment_mode = result.catchment_type
+    result.data_dependencies = summarize_dependencies(dependency_counts)
+    result.fallback_summary = {
+        "used": bool(fallback_notes),
+        "notes": fallback_notes,
+    }
+
+    confidence_level = (result.demographics.data_confidence or "medium").lower()
+    contributors = [
+        f"demographics_confidence={confidence_level}",
+        f"stage2_readiness={(result.feasibility_score.stage2.readiness if result.feasibility_score.stage2 else 'not_ready')}",
+        f"fallback_used={bool(fallback_notes)}",
+    ]
+    if strict_blockers:
+        confidence_level = "low"
+        contributors.append("strict_mode_blockers_present")
+    result.confidence_summary = {
+        "level": confidence_level if confidence_level in {"high", "medium", "low"} else "medium",
+        "contributors": contributors,
+    }
+    confidence_level_final = result.confidence_summary.level if hasattr(result.confidence_summary, "level") else "medium"
+
+    export_reasons = [row["dataset"] for row in result.data_dependencies if row["export_blocking_in_strict"] and not row["available"]]
+    ready = len(export_reasons) == 0 and (confidence_level_final != "low")
+    status = "ready" if ready else ("blocked" if run_mode == "db_strict" else "warning")
+    reason_text = []
+    if export_reasons:
+        reason_text.append(f"Missing export-critical datasets: {', '.join(export_reasons)}")
+    if confidence_level_final == "low":
+        reason_text.append("Overall confidence is low; board-ready packaging should be treated as directional.")
+    result.export_readiness = {"ready": ready, "status": status, "reasons": reason_text}
+
+    missing = [row["dataset"] for row in result.data_dependencies if not row["available"]]
+    result.section_explanations = [
+        {
+            "section": "catchment",
+            "inputs_used": ["isochrone" if result.catchment_mode == "isochrone" else "radius"],
+            "inputs_missing": [],
+            "fallback_used": ["radius fallback"] if result.catchment_mode == "radius" else [],
+            "confidence_impact": "medium" if result.catchment_mode == "radius" else "low",
+        },
+        {
+            "section": "demographics_and_competition",
+            "inputs_used": ["census", "module_competitors"],
+            "inputs_missing": missing,
+            "fallback_used": fallback_notes,
+            "confidence_impact": "high" if fallback_notes else "low",
+        },
+    ]
+
+    if strict_blockers:
+        result.outcome = "strict_mode_blocked"
+    elif fallback_notes:
+        result.outcome = "degraded_success"
+    else:
+        result.outcome = "success"
+    return result
 
 
 async def _enrich_analysis_result(result: AnalysisResponse, request: AnalysisRequest) -> AnalysisResponse:
@@ -757,6 +822,21 @@ async def analyze(request: AnalysisRequest):
     ORS_API_KEY is set; falls back to a grade-level-adaptive radius otherwise.
     Results are cached in Redis for 24 hours (keyed by address + parameters).
     """
+    run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
+    dependency_health = await _collect_db_data_health() if USE_DB else {}
+    dependency_counts = dependency_health.get("counts", {}) if isinstance(dependency_health, dict) else {}
+    blockers = strict_mode_blockers(dependency_counts) if run_mode == "db_strict" else []
+    if blockers:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "STRICT_MODE_BLOCKED",
+                "message": "db_strict mode blocked because required datasets are unavailable.",
+                "run_mode": run_mode,
+                "blockers": blockers,
+            },
+        )
+
     # --- Redis cache read ---
     redis = await _get_redis()
     cache_key = _cache_key(request)
@@ -766,6 +846,13 @@ async def analyze(request: AnalysisRequest):
             if cached:
                 logger.debug("Cache hit for key %s", cache_key)
                 cached_result = AnalysisResponse.model_validate_json(cached)
+                cached_result = _apply_reliability_metadata(
+                    cached_result,
+                    run_mode=run_mode,
+                    dependency_counts=dependency_counts,
+                    fallback_notes=cached_result.fallback_summary.notes if cached_result.fallback_summary else [],
+                    strict_blockers=blockers,
+                )
                 return await _enrich_analysis_result(cached_result, request)
         except Exception:
             _mark_redis_failure()
@@ -792,12 +879,21 @@ async def analyze(request: AnalysisRequest):
             },
         )
 
-    result = await _enrich_analysis_result(await _run_analysis(location, request), request)
+    raw_result, context = await _run_analysis(location, request, run_mode=run_mode)
+    result = _apply_reliability_metadata(
+        raw_result,
+        run_mode=run_mode,
+        dependency_counts=dependency_counts,
+        fallback_notes=context.get("fallback_notes", []),
+        strict_blockers=blockers,
+    )
+    result = await _enrich_analysis_result(result, request)
 
     # --- Redis cache write ---
     if redis:
         try:
             await redis.setex(cache_key, CACHE_TTL, result.model_dump_json())
+            await redis.setex(snapshot_key(request), SNAPSHOT_TTL, json.dumps(freeze_snapshot(result)))
         except Exception:
             _mark_redis_failure()
             logger.warning("Redis set failed for key %s", cache_key, exc_info=True)
@@ -853,7 +949,7 @@ async def analyze_compare(request: CompareAnalysisRequest):
                 logger.warning("Redis get failed for compare key %s", cache_key, exc_info=True)
 
         if result is None:
-            result = await _run_analysis(location, single_request)
+            result, _ = await _run_analysis(location, single_request)
             if redis:
                 try:
                     await redis.setex(cache_key, CACHE_TTL, result.model_dump_json())
@@ -901,7 +997,15 @@ async def export_board_pack(request: AnalysisRequest):
     if not location:
         raise HTTPException(status_code=422, detail="Could not geocode the provided address.")
 
-    result = await _enrich_analysis_result(await _run_analysis(location, request), request)
+    run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
+    redis = await _get_redis()
+    result = thaw_snapshot(await redis.get(snapshot_key(request))) if redis else None
+    if result is None:
+        result, ctx = await _run_analysis(location, request, run_mode=run_mode)
+        result = _apply_reliability_metadata(result, run_mode=run_mode, dependency_counts=None, fallback_notes=ctx.get("fallback_notes", []), strict_blockers=[])
+    result = await _enrich_analysis_result(result, request)
+    if not result.export_readiness.ready:
+        result.outcome = "export_blocked_readiness"
     return {
         "trace_id": result.trace_id,
         "school_name": result.school_name,
@@ -909,6 +1013,7 @@ async def export_board_pack(request: AnalysisRequest):
         "board_report_pack": result.board_report_pack,
         "benchmark_narrative": result.benchmark_narrative,
         "data_freshness": result.data_freshness,
+        "export_readiness": result.export_readiness,
     }
 
 
@@ -922,7 +1027,13 @@ async def export_csv(request: AnalysisRequest):
     if not location:
         raise HTTPException(status_code=422, detail="Could not geocode the provided address.")
 
-    result = await _enrich_analysis_result(await _run_analysis(location, request), request)
+    run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
+    redis = await _get_redis()
+    result = thaw_snapshot(await redis.get(snapshot_key(request))) if redis else None
+    if result is None:
+        result, ctx = await _run_analysis(location, request, run_mode=run_mode)
+        result = _apply_reliability_metadata(result, run_mode=run_mode, dependency_counts=None, fallback_notes=ctx.get("fallback_notes", []), strict_blockers=[])
+    result = await _enrich_analysis_result(result, request)
     csv_content = generate_csv_report(result)
     filename = f"feasibility_{request.school_name.replace(' ', '_')}.csv"
 
@@ -1213,7 +1324,13 @@ async def export_pdf(request: AnalysisRequest):
             detail={"error_code": "GEOCODE_FAILED", "message": "Could not geocode the provided address."},
         )
 
-    result = await _enrich_analysis_result(await _run_analysis(location, request), request)
+    run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
+    redis = await _get_redis()
+    result = thaw_snapshot(await redis.get(snapshot_key(request))) if redis else None
+    if result is None:
+        result, ctx = await _run_analysis(location, request, run_mode=run_mode)
+        result = _apply_reliability_metadata(result, run_mode=run_mode, dependency_counts=None, fallback_notes=ctx.get("fallback_notes", []), strict_blockers=[])
+    result = await _enrich_analysis_result(result, request)
     pdf_bytes = generate_pdf_report(result, request)
     safe_name = request.school_name.replace(" ", "_")
     filename = f"feasibility_{safe_name}.pdf"
@@ -1294,7 +1411,7 @@ async def scoring_weights():
     }
 
 
-async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisResponse:
+async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str = DEFAULT_RUN_MODE) -> tuple[AnalysisResponse, dict]:
     """
     Orchestrate the full analysis pipeline:
     1. Fetch drive-time isochrone (sequential — needed before data fetch).
@@ -1310,6 +1427,7 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
 
     # Step 1: Attempt isochrone fetch (with DB cache when enabled)
     isochrone_polygon = None
+    fallback_notes: list[str] = []
     if USE_DB:
         from db.connection import get_session
         from db.queries import lookup_cached_isochrone, save_isochrone
@@ -1356,6 +1474,7 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
     else:
         effective_radius = GRADE_LEVEL_FALLBACK_RADIUS.get(grade_level, 12.0)
         catchment_type = "radius"
+        fallback_notes.append("Isochrone unavailable; used grade-level radius fallback.")
 
     # Step 2: Fetch demographics (DB-backed first, with automatic live fallback)
     demographics = None
@@ -1383,6 +1502,7 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
                 "falling back to live Census API for this request."
             )
             used_live_demographics_fallback = True
+            fallback_notes.append("DB demographics unavailable; used live Census API fallback.")
 
     if (not USE_DB) or used_live_demographics_fallback:
         demographics = await get_demographics(
@@ -1437,7 +1557,7 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
         except Exception:
             logger.warning("Failed to persist analysis history for '%s'", request.school_name, exc_info=True)
 
-    return result
+    return result, {"used_live_demographics_fallback": used_live_demographics_fallback, "fallback_notes": fallback_notes, "catchment_type": catchment_type}
 
 
 async def _load_workspace(session, workspace_id: str):

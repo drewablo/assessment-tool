@@ -101,6 +101,7 @@ class AnalysisRequest(BaseModel):
     min_mds_overall_rating: Optional[int] = Field(default=None, ge=1, le=5)
     stage2_inputs: Optional[Stage2Inputs] = None
     facility_profile: Optional[FacilityProfile] = None
+    run_mode: Optional[Literal["live_only", "db_with_fallback", "db_strict"]] = None
 
 
 class CompareAnalysisRequest(BaseModel):
@@ -360,6 +361,41 @@ class BoardReportPack(BaseModel):
     methodology_assumptions: List[str] = Field(default_factory=list)
     confidence_notes: List[str] = Field(default_factory=list)
 
+
+class DataDependencyStatus(BaseModel):
+    dataset: str
+    required: bool
+    baseline_blocking: bool
+    affects_confidence: bool
+    export_blocking_in_strict: bool
+    available: bool
+    row_count: int = 0
+    note: Optional[str] = None
+
+
+class SectionExplanation(BaseModel):
+    section: str
+    inputs_used: List[str] = Field(default_factory=list)
+    inputs_missing: List[str] = Field(default_factory=list)
+    fallback_used: List[str] = Field(default_factory=list)
+    confidence_impact: Literal["none", "low", "medium", "high"] = "none"
+
+
+class ExportReadiness(BaseModel):
+    ready: bool = False
+    status: Literal["ready", "warning", "blocked"] = "warning"
+    reasons: List[str] = Field(default_factory=list)
+
+
+class ConfidenceSummary(BaseModel):
+    level: Literal["high", "medium", "low"] = "medium"
+    contributors: List[str] = Field(default_factory=list)
+
+
+class FallbackSummary(BaseModel):
+    used: bool = False
+    notes: List[str] = Field(default_factory=list)
+
 class DecisionPathwayRecommendation(BaseModel):
     recommended_pathway: Literal["continue", "transform", "partner", "close"]
     confidence: Literal["high", "medium", "low"] = "medium"
@@ -440,6 +476,14 @@ class AnalysisResponse(BaseModel):
     population_gravity: Optional[PopulationGravityMap] = None
     enrollment_forecast: Optional[EnrollmentForecast] = None
     trace_id: Optional[str] = None
+    run_mode: Literal["live_only", "db_with_fallback", "db_strict"] = "db_with_fallback"
+    catchment_mode: Literal["isochrone", "radius"] = "radius"
+    outcome: Literal["success", "degraded_success", "strict_mode_blocked", "upstream_unavailable", "export_blocked_readiness"] = "success"
+    fallback_summary: FallbackSummary = Field(default_factory=FallbackSummary)
+    confidence_summary: ConfidenceSummary = Field(default_factory=ConfidenceSummary)
+    data_dependencies: List[DataDependencyStatus] = Field(default_factory=list)
+    export_readiness: ExportReadiness = Field(default_factory=ExportReadiness)
+    section_explanations: List[SectionExplanation] = Field(default_factory=list)
     data_freshness: Optional[DataFreshnessMetadata] = None
     benchmark_narrative: Optional[BenchmarkNarrative] = None
     board_report_pack: Optional[BoardReportPack] = None

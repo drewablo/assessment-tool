@@ -189,6 +189,17 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
         </div>
       )}
 
+
+      {result.export_readiness && !result.export_readiness.ready && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl px-5 py-4">
+          <p className="text-sm font-semibold text-amber-900">Board-ready export gating active</p>
+          <p className="text-xs text-amber-800 mt-1">
+            This run is directional and not currently export-ready for board materials.
+            {result.export_readiness.reasons?.length ? ` Reasons: ${result.export_readiness.reasons.join("; ")}` : ""}
+          </p>
+        </div>
+      )}
+
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -219,11 +230,11 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
           </button>
           <button
             onClick={handleExportBoardPack}
-            disabled={exportingBoardPack}
+            disabled={exportingBoardPack || !result.export_readiness?.ready}
             className="flex items-center gap-1.5 text-sm px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
             <Network className="w-4 h-4" />
-            {exportingBoardPack ? "Exporting..." : "Board Pack"}
+            {exportingBoardPack ? "Exporting..." : result.export_readiness?.ready ? "Board Pack" : "Board Pack (Blocked)"}
           </button>
           <button
             onClick={onReset}
