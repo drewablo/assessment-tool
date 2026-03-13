@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: feasibility
+      POSTGRES_USER: feasibility
+      POSTGRES_PASSWORD: feasibility
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U feasibility"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  # Celery worker for data pipelines
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A pipeline.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://feasibility:feasibility@db:5432/feasibility
+      REDIS_URL: redis://redis:6379/0
+      USE_DB: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # Celery beat scheduler for periodic tasks
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A pipeline.celery_app beat --loglevel=info
+    environment:
+      DATABASE_URL: postgresql+asyncpg://feasibility:feasibility@db:5432/feasibility
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://feasibility:feasibility@db:5432/feasibility
+      REDIS_URL: redis://redis:6379/0
+      USE_DB: "true"
+      FRONTEND_URL: http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

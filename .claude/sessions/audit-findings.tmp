@@ -1,0 +1,215 @@
+PHASE 2 AUDIT FINDINGS
+======================
+Generated: 2026-03-10
+Auditor: Claude (codebase audit)
+
+Legend:
+  [CRITICAL] — Can cause deadlocks, data corruption, or incorrect results in production
+  [HIGH]     — Produces wrong data visible to users or API consumers
+  [MEDIUM]   — Incorrect documentation/metadata that misleads developers or users
+  [LOW]      — Minor inefficiency or style issue
+
+
+#1  [CRITICAL]  Async deadlock: threading.Lock wrapping async/await in schools.py
+    File: backend/api/schools.py, lines 339-345
+    Type: Concurrency / deadlock
+    Currently does:
+      Uses `with _pss_lock:` (a threading.Lock) around a block that calls
+      `await _download_pss_data()`.  When the await suspends the coroutine,
+      the lock remains held.  If a second concurrent request enters the same
+      code path, `threading.Lock.acquire()` blocks the thread — freezing the
+      entire asyncio event loop.  The first coroutine's download callback can
+      never complete → deadlock.
+    Should do:
+      Use `asyncio.Lock()` instead of `threading.Lock()`, and change the
+      context manager to `async with _pss_lock:`.  Alternatively, restructure
+      so no `await` occurs while the lock is held (e.g., check cache validity
+      outside the lock, acquire lock only for the synchronous cache-read path).
+    Impact: Deadlocks the FastAPI server on cold start if two or more requests
+      arrive concurrently before PSS data is cached (~120-second download window).
+
+
+#2  [CRITICAL]  Async deadlock: threading.Lock wrapping async/await in CMS download
+    File: backend/competitors/cms_care_compare.py, lines 124-137
+    Type: Concurrency / deadlock
+    Currently does:
+      `_download_cms_provider_data()` is an `async def` that uses
+      `with _cms_download_lock:` (a threading.Lock) wrapping calls to
+      `await _try_csv_download()` and `await _try_json_api_download()`.
+      Same deadlock pattern as #1 — second concurrent request blocks the
+      event loop while the first is awaiting the HTTP download.
+    Should do:
+      Use `asyncio.Lock()` or restructure to avoid holding a synchronous lock
+      across await points.
+    Impact: Deadlocks the server during elder_care analysis cold start if
+      concurrent requests trigger CMS data download simultaneously.
+
+
+#3  [CRITICAL]  Async deadlock: threading.Lock wrapping async/await in AL download
+    File: backend/competitors/cms_care_compare.py, lines 172-190
+    Type: Concurrency / deadlock
+    Currently does:
+      `_download_al_data()` uses `with _al_download_lock:` (threading.Lock)
+      around `await client.get(...)`.  Same deadlock pattern as #1 and #2.
+    Should do:
+      Use `asyncio.Lock()`.
+    Impact: Deadlocks the server during assisted-living data download on cold start.
+
+
+#4  [HIGH]  B25070_011E ("Gross rent not computed") incorrectly counted as cost-burdened
+    File: backend/api/census.py, line 464 (tract aggregation) and line 963 (county fallback)
+    Type: Data / scoring correctness
+    Currently does:
+      The cost_burdened_renter_households accumulator includes B25070_011E
+      alongside B25070_007E through B25070_010E.  B25070_011E represents
+      renter households where gross-rent-as-percent-of-income was "not
+      computed" — typically households with zero/negative income or those
+      not paying cash rent.  These are NOT cost-burdened by the standard
+      HUD >30% definition.
+    Should do:
+      Exclude B25070_011E from the cost-burdened sum.  Only B25070_007E
+      (30-34.9%), B25070_008E (35-39.9%), B25070_009E (40-49.9%), and
+      B25070_010E (50%+) should be summed.
+    Impact: Inflates cost_burdened_renter_households counts, overstating
+      the housing module's market_size score and family_density score.
+      Also affects the HUD-eligible proxy in housing.py.  Nationally,
+      B25070_011E is ~6-8% of renter households — a material overcount.
+
+
+#5  [HIGH]  /api/scoring/weights endpoint reports incorrect weights for housing module
+    File: backend/main.py, lines 1016-1021
+    Type: API correctness / data integrity
+    Currently does:
+      Reports housing weights as:
+        market_size=0.35, income=0.25, competition=0.25, family_density=0.15
+    Should do:
+      Report the actual weights from housing.py line 52:
+        market_size=0.40, income=0.30, competition=0.20, family_density=0.10
+    Impact: API consumers (frontend, integrations) display wrong weight
+      information.  All four weights are incorrect.
+
+
+#6  [HIGH]  /api/scoring/weights endpoint reports incorrect weights for elder_care module
+    File: backend/main.py, lines 1022-1027
+    Type: API correctness / data integrity
+    Currently does:
+      Reports elder_care weights as:
+        market_size=0.35, income=0.25, competition=0.25, family_density=0.15
+      Does not distinguish between mission and market modes, and completely
+      omits the "occupancy" factor (10% weight in both modes).
+    Should do:
+      Report weights for both modes:
+        mission:  market_size=0.35, income=0.15, competition=0.30,
+                  family_density=0.10, occupancy=0.10
+        market:   market_size=0.35, income=0.25, competition=0.25,
+                  family_density=0.05, occupancy=0.10
+      family_density=0.15 matches neither mode (mission=0.10, market=0.05).
+      The occupancy sub-score (10% weight) is entirely missing.
+    Impact: API consumers get wrong weight metadata for elder_care analysis.
+      The missing occupancy factor means the documented weights only sum to
+      0.90, which is inconsistent and confusing.
+
+
+#7  [MEDIUM]  _score_market_size docstring states wrong urban adjustment
+    File: backend/api/analysis.py, lines 508-509
+    Type: Documentation accuracy
+    Currently does:
+      Docstring says "urban -4, suburban 0, rural +4"
+    Should do:
+      Say "urban -8, suburban 0, rural +4" — matching the actual
+      _MARKET_CONTEXT_ADJUSTMENT dict at line 173.
+    Impact: Developer reading the docstring gets the wrong impression of
+      the urban penalty magnitude.  The actual code at line 173 is correct;
+      only the docstring is wrong.
+
+
+#8  [MEDIUM]  Double haversine computation in _get_tracts_in_radius
+    File: backend/api/census.py, lines 346-347
+    Type: Performance / logic
+    Currently does:
+      Computes haversine_miles(lat, lon, tract_lat, tract_lon) twice for
+      the same pair of coordinates — once for the radius filter check
+      (line 346) and once to store the result (line 347).
+    Should do:
+      Compute once, store in a variable, use for both the filter and the
+      result dict.
+    Impact: Minor CPU waste.  haversine involves trig functions, and this
+      runs per tract per request.  In areas with many tracts (urban), the
+      redundant computation adds up.
+
+
+#9  [LOW]  QUESTION: Senior population projections only model attrition
+    File: backend/modules/elder_care.py, lines 285-290
+    Type: Algorithm correctness (question — may be intentional)
+    Currently does:
+      Projects seniors_projected_5yr and seniors_projected_10yr by applying
+      survival rates (SURVIVAL_RATE_65_TO_74=0.9798, SURVIVAL_RATE_75_PLUS=
+      0.9542) to the CURRENT senior population.  Since both rates are < 1.0,
+      projected counts will ALWAYS be lower than current counts.  No new
+      entrants aging into the 65+ cohort are modeled.
+    Should do (if bug):
+      A true population projection would account for the 55-64 cohort aging
+      into 65+ over the projection horizon.  Without this, the "projection"
+      only shows how many of today's seniors will survive — not how many
+      seniors the area will actually have.
+    If intentional:
+      The field names (seniors_projected_5yr/10yr) could be clarified to
+      indicate they represent "surviving cohort" estimates, not total
+      future senior population.  A data_note explaining this limitation
+      would help users avoid misinterpreting declining projections as
+      evidence of a shrinking market.
+    Impact: Projections shown to users may understate future senior
+      population, making elder care markets look less attractive than
+      they actually are.
+
+
+SUMMARY
+=======
+  Critical:  3  (all async deadlock — same root cause pattern)
+  High:      3  (1 data correctness, 2 API metadata)
+  Medium:    2  (1 docstring, 1 performance)
+  Low:       1  (question / potential algorithm issue)
+  ─────────────
+  Total:     9 findings
+
+
+PHASE 3 RESOLUTION LOG
+======================
+
+  #1  [CRITICAL]  ✅ RESOLVED — threading.Lock → asyncio.Lock in schools.py
+  #2  [CRITICAL]  ✅ RESOLVED — threading.Lock → asyncio.Lock for CMS download lock
+  #3  [CRITICAL]  ✅ RESOLVED — threading.Lock → asyncio.Lock for AL download lock
+  #4  [HIGH]      ✅ RESOLVED — B25070_011E removed from cost-burdened sum (3 sites)
+  #5  [HIGH]      ✅ RESOLVED — Housing weights corrected in /api/scoring/weights
+  #6  [HIGH]      ✅ RESOLVED — Elder care weights corrected (both modes + occupancy)
+  #7  [MEDIUM]    ✅ RESOLVED — Docstring corrected: "urban -4" → "urban -8"
+  #8  [MEDIUM]    ✅ RESOLVED — Double haversine eliminated; compute once, reuse
+  #9  [LOW]       ⏸️  DEFERRED — Flagged as question; no code change made
+
+  Fixed: 8/9    Deferred: 1/9
+
+
+PHASE 4 VERIFICATION
+====================
+  All 8 fixes verified by re-reading modified files:
+  - schools.py: asyncio imported, _pss_lock = asyncio.Lock(), async with _pss_lock
+  - cms_care_compare.py: asyncio imported, both locks = asyncio.Lock(), async with
+  - census.py: B25070_011E absent from all 3 cost-burdened sums; haversine single-call
+  - analysis.py: docstring reads "urban -8"
+  - main.py: housing weights 0.40/0.30/0.20/0.10; elder_care split by mode with occupancy
+
+  No test suite found in repository to run automated verification.
+
+
+NOTES:
+  - Portfolio workspace endpoints (create, update, compare-snapshot) rely on
+    get_session() auto-commit — confirmed correct by reading db/connection.py.
+  - delete_history_record (main.py:966) has an explicit commit() inside
+    get_session() auto-commit context — redundant but harmless (no-op double
+    commit). Not flagged as a bug.
+  - The compare endpoint (/api/analyze/compare) does not call
+    _enrich_analysis_result, but it only extracts fields that are set by
+    _run_analysis, so this is fine for its use case.
+  - schools.py lon_buf uses /50.0 (approximate) vs census.py's more accurate
+    /69.0*cos(lat). Both are bounding-box pre-filters; the looser approximation
+    in schools.py is acceptable since haversine does the precise filtering.

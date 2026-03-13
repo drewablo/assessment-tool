@@ -1,0 +1,546 @@
+{
+  "run_date": "2026-03-04T21:50:37.758943+00:00",
+  "backtest_results": {
+    "success_locations": [
+      {
+        "location": "Naperville, IL (K-8)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 88,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 64
+        },
+        "components": {
+          "market_size": 93,
+          "income": 100,
+          "competition": 64,
+          "family_density": 97
+        },
+        "catholic_school_count": 24,
+        "total_private_school_count": 86,
+        "state": "Illinois",
+        "county": "selected area",
+        "address": "120 MILL ST, NAPERVILLE, IL, 60540"
+      },
+      {
+        "location": "Wellesley, MA (K-8)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 73,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 48
+        },
+        "components": {
+          "market_size": 62,
+          "income": 100,
+          "competition": 48,
+          "family_density": 97
+        },
+        "catholic_school_count": 22,
+        "total_private_school_count": 79,
+        "state": "Massachusetts",
+        "county": "selected area",
+        "address": "34 BENVENUE ST, WELLESLEY, MA, 02482"
+      },
+      {
+        "location": "Flourtown, PA (Girls HS)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 65,
+        "pass": true,
+        "weak_component": {
+          "name": "market_size",
+          "score": 38
+        },
+        "components": {
+          "market_size": 38,
+          "income": 100,
+          "competition": 48,
+          "family_density": 97
+        },
+        "catholic_school_count": 17,
+        "total_private_school_count": 63,
+        "state": "Pennsylvania",
+        "county": "selected area",
+        "address": "120 W WISSAHICKON AVE, FLOURTOWN, PA, 19031"
+      },
+      {
+        "location": "Omaha, NE (K-8)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 87,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 54
+        },
+        "components": {
+          "market_size": 95,
+          "income": 100,
+          "competition": 54,
+          "family_density": 97
+        },
+        "catholic_school_count": 17,
+        "total_private_school_count": 32,
+        "state": "",
+        "county": "selected area",
+        "address": "Patrick Avenue, Omaha, Chicago Precinct, Douglas County, Nebraska, 68116, United States"
+      },
+      {
+        "location": "Miami, FL (K-8)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 82,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 54
+        },
+        "components": {
+          "market_size": 85,
+          "income": 97,
+          "competition": 54,
+          "family_density": 97
+        },
+        "catholic_school_count": 21,
+        "total_private_school_count": 182,
+        "state": "Florida",
+        "county": "selected area",
+        "address": "8625 SW 84TH AVE, MIAMI, FL, 33143"
+      },
+      {
+        "location": "St. Louis, MO (K-8)",
+        "expected": ">= 60",
+        "cohort": "success",
+        "actual": 84,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 55
+        },
+        "components": {
+          "market_size": 88,
+          "income": 100,
+          "competition": 55,
+          "family_density": 97
+        },
+        "catholic_school_count": 47,
+        "total_private_school_count": 106,
+        "state": "Missouri",
+        "county": "selected area",
+        "address": "583 COEUR DEVILLE DR, SAINT LOUIS, MO, 63141"
+      }
+    ],
+    "struggle_locations": [
+      {
+        "location": "Rural Appalachia, WV (K-8)",
+        "expected": "<= 55",
+        "cohort": "struggle",
+        "actual": 40,
+        "pass": true,
+        "weak_component": {
+          "name": "market_size",
+          "score": 2
+        },
+        "components": {
+          "market_size": 2,
+          "income": 54,
+          "competition": 47,
+          "family_density": 97
+        },
+        "catholic_school_count": 0,
+        "total_private_school_count": 1,
+        "state": "West Virginia",
+        "county": "selected area",
+        "address": "101 MAIN AVE, LOGAN, WV, 25601"
+      },
+      {
+        "location": "Scranton, PA (K-8)",
+        "expected": "<= 55",
+        "cohort": "struggle",
+        "actual": 57,
+        "pass": false,
+        "weak_component": {
+          "name": "market_size",
+          "score": 41
+        },
+        "components": {
+          "market_size": 41,
+          "income": 62,
+          "competition": 49,
+          "family_density": 97
+        },
+        "catholic_school_count": 9,
+        "total_private_school_count": 19,
+        "state": "Pennsylvania",
+        "county": "selected area",
+        "address": "1600 FARR ST, SCRANTON, PA, 18504"
+      },
+      {
+        "location": "Inner-city Detroit, MI (K-8)",
+        "expected": "<= 55",
+        "cohort": "struggle",
+        "actual": 68,
+        "pass": false,
+        "weak_component": {
+          "name": "income",
+          "score": 46
+        },
+        "components": {
+          "market_size": 82,
+          "income": 46,
+          "competition": 55,
+          "family_density": 91
+        },
+        "catholic_school_count": 13,
+        "total_private_school_count": 46,
+        "state": "",
+        "county": "selected area",
+        "address": "Martin Luther King Junior Boulevard, Detroit, Wayne County, Michigan, 48208, United States"
+      },
+      {
+        "location": "Rural Mississippi (K-8)",
+        "expected": "<= 55",
+        "cohort": "struggle",
+        "actual": 35,
+        "pass": true,
+        "weak_component": {
+          "name": "competition",
+          "score": 17
+        },
+        "components": {
+          "market_size": 30,
+          "income": 22,
+          "competition": 17,
+          "family_density": 94
+        },
+        "catholic_school_count": 1,
+        "total_private_school_count": 7,
+        "state": "Mississippi",
+        "county": "selected area",
+        "address": "800 S THEOBALDS ST, GREENVILLE, MS, 38701"
+      }
+    ],
+    "discrimination_power": {
+      "avg_success": 79.83,
+      "avg_struggle": 50,
+      "avg_delta": 29.83,
+      "spread": 53,
+      "component_systematic": {
+        "market_size": {
+          "min": 2,
+          "max": 95,
+          "always_maxed": false,
+          "always_floored": false
+        },
+        "income": {
+          "min": 22,
+          "max": 100,
+          "always_maxed": false,
+          "always_floored": false
+        },
+        "competition": {
+          "min": 17,
+          "max": 64,
+          "always_maxed": false,
+          "always_floored": false
+        },
+        "family_density": {
+          "min": 91,
+          "max": 97,
+          "always_maxed": false,
+          "always_floored": false
+        }
+      },
+      "pass": true
+    }
+  },
+  "assumption_checks": {
+    "catholic_pct": {
+      "status": "OK",
+      "max_delta": 0.0,
+      "flagged_states": [],
+      "methodology_note": "Reference base year 2024"
+    },
+    "income_propensity": {
+      "status": "OK",
+      "comparison_table": [
+        {
+          "income_bracket": "< $20k",
+          "our_assumption_pct": 3.5,
+          "nces_actual_pct": 3.8,
+          "delta_pct_points": -0.3,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$20k-$35k",
+          "our_assumption_pct": 5.0,
+          "nces_actual_pct": 5.1,
+          "delta_pct_points": -0.1,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$35k-$50k",
+          "our_assumption_pct": 7.5,
+          "nces_actual_pct": 7.0,
+          "delta_pct_points": 0.5,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$50k-$75k",
+          "our_assumption_pct": 11.0,
+          "nces_actual_pct": 10.5,
+          "delta_pct_points": 0.5,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$75k-$100k",
+          "our_assumption_pct": 15.5,
+          "nces_actual_pct": 14.2,
+          "delta_pct_points": 1.3,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$100k-$150k",
+          "our_assumption_pct": 19.5,
+          "nces_actual_pct": 19.8,
+          "delta_pct_points": -0.3,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$150k-$200k",
+          "our_assumption_pct": 26.0,
+          "nces_actual_pct": 24.5,
+          "delta_pct_points": 1.5,
+          "status": "OK"
+        },
+        {
+          "income_bracket": "$200k+",
+          "our_assumption_pct": 31.0,
+          "nces_actual_pct": 31.0,
+          "delta_pct_points": 0.0,
+          "status": "OK"
+        }
+      ],
+      "flagged_brackets": []
+    },
+    "school_choice_states": {
+      "status": "OK",
+      "strong_choice": {
+        "missing": [],
+        "extra": []
+      },
+      "established_choice": {
+        "missing": [],
+        "extra": []
+      },
+      "voucher_impact_check": {
+        "FL": {
+          "avg_voucher_usd": 8200,
+          "avg_tuition_usd": 9600,
+          "voucher_to_tuition_ratio": 0.854,
+          "implied_income_shift_usd": 41000.0,
+          "model_strong_shift_usd": 22500
+        },
+        "OH": {
+          "avg_voucher_usd": 7600,
+          "avg_tuition_usd": 9200,
+          "voucher_to_tuition_ratio": 0.826,
+          "implied_income_shift_usd": 38000.0,
+          "model_strong_shift_usd": 22500
+        },
+        "IN": {
+          "avg_voucher_usd": 6400,
+          "avg_tuition_usd": 8800,
+          "voucher_to_tuition_ratio": 0.727,
+          "implied_income_shift_usd": 32000.0,
+          "model_strong_shift_usd": 22500
+        }
+      }
+    },
+    "reference_enrollment": {
+      "status": "WATCH",
+      "rows": [
+        {
+          "grade_level": "k5",
+          "variant": "coed",
+          "reference_enrollment": 200,
+          "median": 190,
+          "mode": 180,
+          "iqr": [
+            140,
+            240
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "k5",
+          "variant": "gendered",
+          "reference_enrollment": 150,
+          "median": 190,
+          "mode": 180,
+          "iqr": [
+            140,
+            240
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "k8",
+          "variant": "coed",
+          "reference_enrollment": 250,
+          "median": 235,
+          "mode": 220,
+          "iqr": [
+            170,
+            300
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "k8",
+          "variant": "gendered",
+          "reference_enrollment": 175,
+          "median": 235,
+          "mode": 220,
+          "iqr": [
+            170,
+            300
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "high_school",
+          "variant": "coed",
+          "reference_enrollment": 350,
+          "median": 340,
+          "mode": 320,
+          "iqr": [
+            240,
+            430
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "high_school",
+          "variant": "gendered",
+          "reference_enrollment": 225,
+          "median": 340,
+          "mode": 320,
+          "iqr": [
+            240,
+            430
+          ],
+          "status": "FLAG"
+        },
+        {
+          "grade_level": "k12",
+          "variant": "coed",
+          "reference_enrollment": 400,
+          "median": 390,
+          "mode": 370,
+          "iqr": [
+            280,
+            500
+          ],
+          "status": "OK"
+        },
+        {
+          "grade_level": "k12",
+          "variant": "gendered",
+          "reference_enrollment": 275,
+          "median": 390,
+          "mode": 370,
+          "iqr": [
+            280,
+            500
+          ],
+          "status": "FLAG"
+        }
+      ],
+      "flagged": [
+        {
+          "grade_level": "high_school",
+          "variant": "gendered",
+          "reference_enrollment": 225,
+          "median": 340,
+          "mode": 320,
+          "iqr": [
+            240,
+            430
+          ],
+          "status": "FLAG"
+        },
+        {
+          "grade_level": "k12",
+          "variant": "gendered",
+          "reference_enrollment": 275,
+          "median": 390,
+          "mode": 370,
+          "iqr": [
+            280,
+            500
+          ],
+          "status": "FLAG"
+        }
+      ]
+    },
+    "competition_waitlist": {
+      "source_confirmed": true,
+      "national_waitlist_pct": 39.3,
+      "regional_variation": {
+        "Northeast": 54.0,
+        "Midwest": 41.0,
+        "South": 24.0,
+        "West": 33.0
+      },
+      "regional_spread_pct_points": 30.0,
+      "status": "WATCH"
+    },
+    "cpi_adjustment": {
+      "our_value": 0.19,
+      "actual": 0.1939,
+      "delta": 0.0039,
+      "source": "BLS API",
+      "status": "OK"
+    },
+    "survival_rates": {
+      "source": "CDC/NCHS life tables + SSA actuarial tables",
+      "our_values": {
+        "65_to_74": 0.9798,
+        "75_plus": 0.9542
+      },
+      "reference_values": {
+        "65_to_74": 0.98,
+        "75_plus": 0.952
+      },
+      "delta": {
+        "65_to_74": 0.0002,
+        "75_plus": 0.0022
+      },
+      "status": "OK"
+    },
+    "lihtc_saturation": {
+      "hud_ratio_affordable_to_burdened": 0.58,
+      "model_curve_anchor": {
+        "ratio_0": 96,
+        "ratio_1": 28
+      },
+      "status": "OK",
+      "notes": "Worst Case Housing Needs indicates persistent shortage; many metros below 0.5."
+    },
+    "cost_burden_threshold": {
+      "status": "OK",
+      "hud_current": "30%"
+    }
+  },
+  "recommendations": [
+    "Backtest miss: Scranton, PA (K-8) expected <= 55 but scored 57; investigate market_size (41).",
+    "Backtest miss: Inner-city Detroit, MI (K-8) expected <= 55 but scored 68; investigate income (46).",
+    "Competition model may need region-specific validation weighting because waitlist prevalence varies materially by region."
+  ]
+}

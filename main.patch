@@ -1,0 +1,444 @@
+diff --git a/backend/api/geocoder.py b/backend/api/geocoder.py
+index de62caf95cbab37eeb5978ade1bac4b905652680..a40464053945ea3290db248068a8076b5ef3296f 100644
+--- a/backend/api/geocoder.py
++++ b/backend/api/geocoder.py
+@@ -41,7 +41,7 @@ def _cache_set(key: str, payload: dict | None) -> None:
+     _GEOCODE_CACHE[key] = (datetime.now(timezone.utc) + timedelta(seconds=_GEOCODE_CACHE_TTL_SECONDS), payload)
+ 
+ async def geocode_address(address: str) -> Optional[dict]:
+-    # REVIEW[CACHE]: Geocoding uses an in-process TTL cache; cache entries are not shared across workers/instances.
++    # REVIEW[CACHE]: Geocoding is always live and uncached, so repeated analyses for the same address re-hit the Census geocoder each time.
+     """
+     Geocode an address using the Census Bureau's free Geocoder API.
+     Returns lat/lon plus county and state FIPS codes needed for ACS queries.
+diff --git a/backend/main.py b/backend/main.py
+index 2f14f613117d671b597fdfcc4d9de48a327bb220..b14fa293c5ae7cc317af9b87b60b901881a1963a 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -5,7 +5,6 @@ import logging
+ import os
+ import uuid
+ from contextlib import asynccontextmanager
+-from contextvars import ContextVar
+ from datetime import datetime, timezone, timedelta
+ from dotenv import load_dotenv
+ 
+@@ -13,8 +12,6 @@ load_dotenv()
+ 
+ logger = logging.getLogger(__name__)
+ 
+-_request_id_ctx: ContextVar[str] = ContextVar("request_id", default="-")
+-
+ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, Header
+ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.responses import JSONResponse, StreamingResponse
+@@ -339,36 +336,6 @@ def _build_board_report_pack(result: AnalysisResponse) -> BoardReportPack:
+     )
+ 
+ 
+-def _trace_log(event: str, **fields):
+-    """TEMP_DIAGNOSTIC: request-scoped trace breadcrumbs for analysis flows."""
+-    payload = {
+-        "event": event,
+-        "request_id": _request_id_ctx.get(),
+-        "pid": os.getpid(),
+-    }
+-    payload.update(fields)
+-    logger.info("runtime_trace %s", json.dumps(payload, sort_keys=True))
+-
+-
+-def _request_fingerprint(request: AnalysisRequest) -> str:
+-    payload = json.dumps(
+-        {
+-            "address": " ".join(request.address.strip().lower().split()),
+-            "ministry_type": request.ministry_type,
+-            "drive_minutes": request.drive_minutes,
+-            "grade_level": request.grade_level,
+-            "gender": request.gender,
+-            "weighting_profile": request.weighting_profile,
+-            "market_context": request.market_context,
+-            "mission_mode": request.mission_mode,
+-            "care_level": request.care_level,
+-            "min_mds_overall_rating": request.min_mds_overall_rating,
+-        },
+-        sort_keys=True,
+-    )
+-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+-
+-
+ def _now_utc() -> datetime:
+     return datetime.now(timezone.utc)
+ 
+@@ -397,7 +364,6 @@ async def _get_redis():
+         return _redis
+ 
+     if _redis_retry_after and _now_utc() < _redis_retry_after:
+-        logger.info("Redis cache unavailable; skipping reconnect attempts until %s", _redis_retry_after.isoformat())
+         return None
+ 
+     try:
+@@ -421,17 +387,6 @@ def _mark_redis_failure():
+     _redis_retry_after = _now_utc() + timedelta(seconds=_REDIS_BACKOFF_SECONDS)
+ 
+ 
+-def _log_cache_event(endpoint: str, event: str, key: str, **extra):
+-    """Structured cache-flow breadcrumbs for runtime observability."""
+-    payload = {
+-        "endpoint": endpoint,
+-        "event": event,
+-        "key": key,
+-    }
+-    payload.update(extra)
+-    logger.info("cache_diagnostic %s", json.dumps(payload, sort_keys=True))
+-
+-
+ 
+ def _cache_key(request: AnalysisRequest) -> str:
+     """Stable cache key from analysis request fields that affect output."""
+@@ -644,25 +599,14 @@ app.add_middleware(
+ @app.middleware("http")
+ async def api_key_middleware(request: Request, call_next):
+     """Require X-API-Key header on all requests when INTERNAL_API_KEY is configured."""
+-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+-    token = _request_id_ctx.set(request_id)
+-    _trace_log("request_start", method=request.method, path=request.url.path)
+-    try:
+-        if not INTERNAL_API_KEY:
+-            response = await call_next(request)
+-            return response
+-
+-        # Allow CORS preflight and health checks through
+-        if request.method == "OPTIONS" or request.url.path == "/api/health":
+-            response = await call_next(request)
+-            return response
+-        if request.headers.get("X-API-Key") != INTERNAL_API_KEY:
+-            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+-        response = await call_next(request)
+-        return response
+-    finally:
+-        _trace_log("request_end", method=request.method, path=request.url.path)
+-        _request_id_ctx.reset(token)
++    if not INTERNAL_API_KEY:
++        return await call_next(request)
++    # Allow CORS preflight and health checks through
++    if request.method == "OPTIONS" or request.url.path == "/api/health":
++        return await call_next(request)
++    if request.headers.get("X-API-Key") != INTERNAL_API_KEY:
++        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
++    return await call_next(request)
+ 
+ 
+ @app.get("/api/health")
+@@ -692,24 +636,16 @@ async def analyze(request: AnalysisRequest):
+     # --- Redis cache read ---
+     redis = await _get_redis()
+     cache_key = _cache_key(request)
+-    _trace_log("analyze_request", endpoint="/api/analyze", fingerprint=_request_fingerprint(request), cache_key=cache_key)
+-    _log_cache_event("/api/analyze", "lookup_attempt", cache_key, redis_available=bool(redis))
+     if redis:
+         try:
+             cached = await redis.get(cache_key)
+             if cached:
+-                _log_cache_event("/api/analyze", "lookup_hit", cache_key)
++                logger.debug("Cache hit for key %s", cache_key)
+                 cached_result = AnalysisResponse.model_validate_json(cached)
+-                _log_cache_event("/api/analyze", "return_cached", cache_key)
+-                _trace_log("outbound_skipped", endpoint="/api/analyze", reason="redis_cache_hit")
+                 return await _enrich_analysis_result(cached_result, request)
+-            _log_cache_event("/api/analyze", "lookup_miss", cache_key)
+         except Exception:
+             _mark_redis_failure()
+-            _log_cache_event("/api/analyze", "lookup_error", cache_key)
+             logger.warning("Redis get failed for key %s", cache_key, exc_info=True)
+-    else:
+-        _log_cache_event("/api/analyze", "lookup_bypass", cache_key, reason="redis_unavailable")
+ 
+     location = await geocode_address(request.address)
+     if not location:
+@@ -728,13 +664,9 @@ async def analyze(request: AnalysisRequest):
+     if redis:
+         try:
+             await redis.setex(cache_key, CACHE_TTL, result.model_dump_json())
+-            _log_cache_event("/api/analyze", "write_success", cache_key, ttl_seconds=CACHE_TTL)
+         except Exception:
+             _mark_redis_failure()
+-            _log_cache_event("/api/analyze", "write_error", cache_key, ttl_seconds=CACHE_TTL)
+             logger.warning("Redis set failed for key %s", cache_key, exc_info=True)
+-    else:
+-        _log_cache_event("/api/analyze", "write_bypass", cache_key, reason="redis_unavailable")
+ 
+     return result
+ 
+@@ -742,7 +674,7 @@ async def analyze(request: AnalysisRequest):
+ 
+ 
+ @app.post("/api/analyze/compare", response_model=CompareAnalysisResponse)
+-# REVIEW[PERF]: Compare checks Redis per ministry first and only geocodes when at least one cache miss needs fresh analysis.
++# REVIEW[PERF]: Compare runs each ministry sequentially and bypasses the /api/analyze Redis cache path, so repeated compares for the same address recompute all modules.
+ async def analyze_compare(request: CompareAnalysisRequest):
+     """Run analysis for multiple ministry types at one address and return a side-by-side summary."""
+     if not request.ministry_types:
+@@ -750,65 +682,40 @@ async def analyze_compare(request: CompareAnalysisRequest):
+ 
+     deduped_types = list(dict.fromkeys(request.ministry_types))
+ 
+-    _trace_log("analyze_request", endpoint="/api/analyze/compare", ministry_types=deduped_types, fingerprint=_request_fingerprint(_request_from_compare(request, deduped_types[0])) if deduped_types else "-")
+-    redis = await _get_redis()
+-    cache_by_ministry: dict[str, AnalysisResponse] = {}
+-    misses: list[str] = []
++    location = await geocode_address(request.address)
++    if not location:
++        raise HTTPException(
++            status_code=422,
++            detail={
++                "error_code": "GEOCODE_FAILED",
++                "message": "Could not geocode the provided address.",
++                "detail": "Please verify the address is a valid US street address including city and state.",
++            },
++        )
+ 
++    summaries = []
+     for ministry_type in deduped_types:
+         single_request = _request_from_compare(request, ministry_type)
++        redis = await _get_redis()
+         cache_key = _cache_key(single_request)
+-        _log_cache_event("/api/analyze/compare", "lookup_attempt", cache_key, redis_available=bool(redis), ministry_type=ministry_type)
++        result = None
+         if redis:
+             try:
+                 cached = await redis.get(cache_key)
+                 if cached:
+-                    _log_cache_event("/api/analyze/compare", "lookup_hit", cache_key, ministry_type=ministry_type)
+-                    cache_by_ministry[ministry_type] = AnalysisResponse.model_validate_json(cached)
+-                else:
+-                    _log_cache_event("/api/analyze/compare", "lookup_miss", cache_key, ministry_type=ministry_type)
+-                    misses.append(ministry_type)
++                    result = AnalysisResponse.model_validate_json(cached)
+             except Exception:
+                 _mark_redis_failure()
+-                _log_cache_event("/api/analyze/compare", "lookup_error", cache_key, ministry_type=ministry_type)
+                 logger.warning("Redis get failed for compare key %s", cache_key, exc_info=True)
+-                misses.append(ministry_type)
+-        else:
+-            _log_cache_event("/api/analyze/compare", "lookup_bypass", cache_key, reason="redis_unavailable", ministry_type=ministry_type)
+-            misses.append(ministry_type)
+-
+-    location = None
+-    if misses:
+-        location = await geocode_address(request.address)
+-        if not location:
+-            raise HTTPException(
+-                status_code=422,
+-                detail={
+-                    "error_code": "GEOCODE_FAILED",
+-                    "message": "Could not geocode the provided address.",
+-                    "detail": "Please verify the address is a valid US street address including city and state.",
+-                },
+-            )
+-
+-    summaries = []
+-    for ministry_type in deduped_types:
+-        single_request = _request_from_compare(request, ministry_type)
+-        cache_key = _cache_key(single_request)
+ 
+-        result = cache_by_ministry.get(ministry_type)
+         if result is None:
+             result = await _run_analysis(location, single_request)
+             if redis:
+                 try:
+                     await redis.setex(cache_key, CACHE_TTL, result.model_dump_json())
+-                    _log_cache_event("/api/analyze/compare", "write_success", cache_key, ttl_seconds=CACHE_TTL, ministry_type=ministry_type)
+                 except Exception:
+                     _mark_redis_failure()
+-                    _log_cache_event("/api/analyze/compare", "write_error", cache_key, ttl_seconds=CACHE_TTL, ministry_type=ministry_type)
+                     logger.warning("Redis set failed for compare key %s", cache_key, exc_info=True)
+-            else:
+-                _log_cache_event("/api/analyze/compare", "write_bypass", cache_key, reason="redis_unavailable", ministry_type=ministry_type)
+-
+         pathway = _phase1_decision_pathway(result, single_request)
+         factors = _compare_decision_factors(ministry_type, pathway.recommended_pathway)
+         fit_band = "high" if result.feasibility_score.overall >= 75 else "medium" if result.feasibility_score.overall >= 55 else "low"
+@@ -843,7 +750,6 @@ async def analyze_compare(request: CompareAnalysisRequest):
+ @app.post("/api/export/board-pack")
+ async def export_board_pack(request: AnalysisRequest):
+     """Run analysis and return board-ready report pack JSON."""
+-    _trace_log("analyze_request", endpoint="/api/export/board-pack", fingerprint=_request_fingerprint(request), cache_policy="no_redis_analysis_cache")
+     location = await geocode_address(request.address)
+     if not location:
+         raise HTTPException(status_code=422, detail="Could not geocode the provided address.")
+@@ -862,7 +768,6 @@ async def export_board_pack(request: AnalysisRequest):
+ @app.post("/api/export/csv")
+ async def export_csv(request: AnalysisRequest):
+     """Run analysis and return results as a downloadable CSV file."""
+-    _trace_log("analyze_request", endpoint="/api/export/csv", fingerprint=_request_fingerprint(request), cache_policy="no_redis_analysis_cache")
+     location = await geocode_address(request.address)
+     if not location:
+         raise HTTPException(status_code=422, detail="Could not geocode the provided address.")
+@@ -1246,7 +1151,6 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
+                 isochrone_polygon = json.loads(cached.polygon_geojson)
+ 
+     if not isochrone_polygon:
+-        _trace_log("outbound_call", subsystem="isochrone", function="get_isochrone", source="fresh_fetch")
+         isochrone_polygon = await get_isochrone(location["lat"], location["lon"], drive_minutes)
+ 
+     if isochrone_polygon:
+@@ -1303,7 +1207,6 @@ async def _run_analysis(location: dict, request: AnalysisRequest) -> AnalysisRes
+             used_live_demographics_fallback = True
+ 
+     if (not USE_DB) or used_live_demographics_fallback:
+-        _trace_log("outbound_call", subsystem="census", function="get_demographics", source="live_fetch")
+         demographics = await get_demographics(
+             lat=location["lat"],
+             lon=location["lon"],
+diff --git a/backend/tests/test_cache_resilience.py b/backend/tests/test_cache_resilience.py
+index 95bac10fc2883af8f80c43ee451cd7c324702d44..0cbf4a68ab1a72318207f54608c81a0fe8003fa7 100644
+--- a/backend/tests/test_cache_resilience.py
++++ b/backend/tests/test_cache_resilience.py
+@@ -40,10 +40,7 @@ class _Result:
+ 
+ @pytest.mark.asyncio
+ async def test_compare_uses_cached_analysis_when_available(monkeypatch):
+-    geocode_calls = {"count": 0}
+-
+     async def fake_geocode(_address):
+-        geocode_calls["count"] += 1
+         return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+ 
+     run_calls = []
+@@ -76,123 +73,6 @@ async def test_compare_uses_cached_analysis_when_available(monkeypatch):
+ 
+     assert len(response.results) == 2
+     assert run_calls == ["housing"]
+-    assert geocode_calls["count"] == 1
+-
+-
+-@pytest.mark.asyncio
+-async def test_compare_repeated_requests_skip_geocode_when_second_request_is_all_cache_hits(monkeypatch):
+-    geocode_calls = {"count": 0}
+-
+-    async def fake_geocode(_address):
+-        geocode_calls["count"] += 1
+-        return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+-
+-    run_calls = []
+-
+-    async def fake_run(_location, request):
+-        run_calls.append(request.ministry_type)
+-        return _Result(request.ministry_type, 60)
+-
+-    monkeypatch.setattr(main, "geocode_address", fake_geocode)
+-    monkeypatch.setattr(main, "_run_analysis", fake_run)
+-
+-    monkeypatch.setattr(main.AnalysisResponse, "model_validate_json", staticmethod(lambda _payload: _Result("schools", 90)))
+-    fake_redis = _FakeRedis()
+-
+-    async def fake_get_redis():
+-        return fake_redis
+-
+-    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
+-
+-    req = CompareAnalysisRequest(
+-        school_name="X",
+-        address="123 Main",
+-        ministry_types=["schools"],
+-    )
+-
+-    await main.analyze_compare(req)
+-    await main.analyze_compare(req)
+-
+-    # First request computes and caches; second request is cache hit.
+-    assert run_calls == ["schools"]
+-    # Geocoder runs only on first request (cache miss) and is skipped on second all-hit request.
+-    assert geocode_calls["count"] == 1
+-
+-
+-@pytest.mark.asyncio
+-async def test_compare_all_cached_ministries_skip_geocode(monkeypatch):
+-    async def fail_geocode(_address):
+-        raise AssertionError("geocode should not run when all ministry results are cached")
+-
+-    monkeypatch.setattr(main, "geocode_address", fail_geocode)
+-    async def fail_run(*_args, **_kwargs):
+-        raise AssertionError("run_analysis should not run")
+-
+-    monkeypatch.setattr(main, "_run_analysis", fail_run)
+-
+-    req = CompareAnalysisRequest(
+-        school_name="X",
+-        address="123 Main",
+-        ministry_types=["schools", "housing"],
+-    )
+-
+-    schools_key = main._cache_key(AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools"))
+-    housing_key = main._cache_key(AnalysisRequest(school_name="X", address="123 Main", ministry_type="housing"))
+-
+-    monkeypatch.setattr(main.AnalysisResponse, "model_validate_json", staticmethod(lambda _payload: _Result("schools", 90)))
+-    fake_redis = _FakeRedis({schools_key: "{}", housing_key: "{}"})
+-
+-    async def fake_get_redis():
+-        return fake_redis
+-
+-    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
+-
+-    response = await main.analyze_compare(req)
+-    assert len(response.results) == 2
+-
+-
+-@pytest.mark.asyncio
+-async def test_export_board_pack_recomputes_each_call_even_with_analysis_cache(monkeypatch):
+-    geocode_calls = {"count": 0}
+-    run_calls = {"count": 0}
+-
+-    async def fake_geocode(_address):
+-        geocode_calls["count"] += 1
+-        return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+-
+-    async def fake_run(_location, request):
+-        run_calls["count"] += 1
+-        return _Result(request.ministry_type, 60)
+-
+-    async def fake_enrich(result, _request):
+-        result.trace_id = "t"
+-        result.school_name = "X"
+-        result.analysis_address = "123 Main"
+-        result.board_report_pack = None
+-        result.benchmark_narrative = None
+-        result.data_freshness = None
+-        return result
+-
+-    monkeypatch.setattr(main, "geocode_address", fake_geocode)
+-    monkeypatch.setattr(main, "_run_analysis", fake_run)
+-    monkeypatch.setattr(main, "_enrich_analysis_result", fake_enrich)
+-
+-    # Even when Redis has an analysis entry, export endpoint does not read it.
+-    cached_req = AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools")
+-    cached_key = main._cache_key(cached_req)
+-    fake_redis = _FakeRedis({cached_key: "{}"})
+-
+-    async def fake_get_redis():
+-        return fake_redis
+-
+-    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
+-
+-    req = AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools")
+-    await main.export_board_pack(req)
+-    await main.export_board_pack(req)
+-
+-    assert geocode_calls["count"] == 2
+-    assert run_calls["count"] == 2
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 6123d9c2d32216823090ef1a41d80f931b0eb5b1..68b44fb2ac291b3c10bcdf6fa151948085f9074a 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -71,8 +71,6 @@ services:
+     depends_on:
+       db:
+         condition: service_healthy
+-      redis:
+-        condition: service_healthy
+ 
+ volumes:
+   pgdata:

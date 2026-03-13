@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Production secrets — never commit
+.env.prod
+
+# NCES data cache (downloaded at runtime, not committed)
+backend/data/*.csv
+backend/data/*.zip
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/.env.local
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Validation audit runtime artifacts
+backend/validation/model_audit_report.json
+backend/validation/cache/*.json

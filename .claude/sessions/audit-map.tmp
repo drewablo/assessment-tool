@@ -1,0 +1,116 @@
+# Codebase Audit Map
+# Generated: 2026-03-10
+# Phase 1: Full Module/File Structure and Purpose
+
+## Project Overview
+Ministry Assessment Tool — Full-stack feasibility analysis platform for mission-driven planning across three ministry tracks: Schools (Catholic K-12), Housing (affordable/LIHTC), and Elder Care (senior facilities). Combines Census demographics, geospatial catchments, and module-specific competitor data to produce feasibility scores.
+
+## Backend Structure
+
+### Core Application
+- `backend/main.py` — FastAPI entrypoint. All route definitions, Redis caching, decision pathway logic, board report generation, portfolio workspace CRUD, analysis orchestration. ~1292 lines.
+- `backend/errors.py` — Typed exception hierarchy (GeocodingError, ExternalAPIError, DataUnavailableError, ScoringError).
+- `backend/utils.py` — Shared math: piecewise_linear interpolation, haversine_miles, decay_weight, bearing/direction helpers.
+
+### Models
+- `backend/models/schemas.py` — All Pydantic request/response schemas (AnalysisRequest, AnalysisResponse, CompareAnalysisRequest, FeasibilityScore, DemographicData, etc.).
+- `backend/models/__init__.py` — Empty.
+
+### API Modules
+- `backend/api/analysis.py` — Core feasibility scoring engine for schools. Income-first addressable market model, competition scoring (validation/saturation), Stage 2 KPI scoring, recommendation generation. ~1300+ lines.
+- `backend/api/census.py` — ACS demographics fetching (tract-level and county-level), trend computation (2017->2022), gravity-weighted aggregation, directional population analysis. ~1100+ lines.
+- `backend/api/geocoder.py` — Census Bureau Geocoder API integration with in-memory TTL cache.
+- `backend/api/isochrone.py` — OpenRouteService drive-time isochrone integration with fallback radii.
+- `backend/api/schools.py` — NCES PSS data download/caching, competitor school filtering by grade/gender/typology, tier classification.
+- `backend/api/school_stage2.py` — Claude API-powered audit PDF extraction for school financials.
+- `backend/api/benchmarks.py` — Percentile ranking (distribution-based or DB-based).
+- `backend/api/hierarchical_scoring.py` — Hierarchical composite scoring model (4-index nested structure).
+- `backend/api/reports.py` — CSV export generation for all three ministry types.
+- `backend/api/pdf_report.py` — ReportLab PDF report generation.
+- `backend/api/bls_workforce.py` — BLS QCEW workforce availability scoring for elder care.
+
+### Ministry Modules
+- `backend/modules/__init__.py` — MODULE_REGISTRY mapping ministry types to module instances.
+- `backend/modules/base.py` — MinistryModule dataclass (abstract base with weighting_profile).
+- `backend/modules/schools.py` — Schools module: delegates to analysis.py calculate_feasibility, with DB/live school fallback.
+- `backend/modules/housing.py` — Housing module: LIHTC competition, cost-burden scoring, Stage 2 housing KPIs.
+- `backend/modules/elder_care.py` — Elder care module: CMS facility scoring, mission/market modes, workforce integration, Stage 2 elder care KPIs.
+- `backend/modules/frameworks.py` — Shared scoring framework: generic hierarchical builder, benchmark wrapper, score_rating helper.
+
+### Competitors
+- `backend/competitors/hud_lihtc.py` — HUD LIHTC project loader from local CSV cache.
+- `backend/competitors/cms_care_compare.py` — CMS Care Compare + onefact AL facility loading, Overpass API fallback, facility name exclusion logic.
+
+### Database Layer (v2)
+- `backend/db/connection.py` — SQLAlchemy async engine/session factory.
+- `backend/db/models.py` — ORM models (CensusTract, CompetitorSchoolRecord, etc.).
+- `backend/db/queries.py` — Query helpers (opportunities, isochrone cache, nearby schools).
+- `backend/db/demographics.py` — Aggregate demographics from precomputed DB tracts.
+
+### Pipeline
+- `backend/pipeline/base.py` — Pipeline run tracking.
+- `backend/pipeline/celery_app.py` — Celery app configuration.
+- `backend/pipeline/cli.py` — CLI for pipeline operations.
+- `backend/pipeline/ingest_*.py` — Data ingest tasks for census, schools, elder care, housing.
+
+### Validation
+- `backend/validation/model_audit.py` — Empirical validation harness against known markets.
+
+### Tests
+- `backend/tests/` — 16+ test files covering scoring, tiering, benchmarks, caching, exports, pipeline, etc.
+
+## Frontend Structure
+
+### App Router
+- `frontend/src/app/page.tsx` — Main page (analysis form + results dashboard).
+- `frontend/src/app/layout.tsx` — Root layout.
+- `frontend/src/app/login/page.tsx` — Login page.
+- `frontend/src/app/intelligence/page.tsx` — Intelligence/insights page.
+- `frontend/src/app/api/auth/[...nextauth]/route.ts` — NextAuth route.
+- `frontend/src/app/api/health/route.ts` — Frontend health check.
+
+### Components
+- `AnalysisForm.tsx` — Ministry settings form with audit PDF upload.
+- `ResultsDashboard.tsx` — Score cards, map, charts display.
+- `CompetitorTable.tsx` — Competitor landscape table.
+- `Stage2Dashboard.tsx` — Stage 2 financial panel.
+- `DemographicsPanel.tsx` — Demographics display.
+- `ScoreGauge.tsx` — Score visualization.
+- `PopulationGravityPanel.tsx` — Population gravity map display.
+- `ElderCareGravityPanel.tsx` — Elder care gravity panel.
+- `HousingGravityPanel.tsx` — Housing gravity panel.
+- `SchoolMap.tsx` — Leaflet map component.
+- `TrendPanel.tsx` — Demographic trend display.
+- `HierarchicalScorePanel.tsx` — Hierarchical score breakdown.
+- `BenchmarkPanel.tsx` — Benchmark percentile display.
+- `MetricCard.tsx` — Reusable metric card.
+- `HistoryPanel.tsx` — Analysis history panel.
+- `WhatIfSimulator.tsx` — What-if scenario simulator.
+- `LoadingSkeleton.tsx` — Loading placeholder.
+
+### Lib
+- `frontend/src/lib/api.ts` — Typed API client.
+- `frontend/src/lib/intelligence.js` — Intelligence helper.
+- `frontend/src/middleware.ts` — Auth middleware.
+
+## Issues Spotted During Phase 1 Reading
+
+1. **main.py:1207-1209**: Portfolio workspace create_portfolio_workspace does NOT commit the session — the `async with get_session()` context manager may auto-commit on some configurations but the pattern elsewhere uses explicit `await session.commit()`.
+
+2. **main.py:1256-1259**: Portfolio workspace update_portfolio_workspace also does NOT commit the session after modifying `row.payload` and `row.version`.
+
+3. **main.py:1287-1291**: Portfolio workspace compare-snapshot endpoint also does NOT commit after modifying payload.
+
+4. **modules/elder_care.py:287-290**: Senior population projection formula only models survival of the EXISTING cohort but doesn't account for aging-in (people turning 65 during the projection period). This makes projections systematically pessimistic.
+
+5. **api/analysis.py**: The `_score_income` function docstring says it uses high-income households >=75k, but the actual `_HIGH_INCOME_BONUS_SEGMENTS` and `_HIGH_INCOME_VARS` in census.py use $100k+ threshold. The docstring is stale but the code is correct.
+
+6. **modules/housing.py:194**: Variable named `ratio` holds `median_household_income`, not an actual ratio. Misleading variable name.
+
+7. **api/bls_workforce.py:155-156**: The `disclosure_code` check `if disclosure and disclosure != ""` is redundant — the first condition already handles empty strings being falsy.
+
+8. **main.py:674**: In compare endpoint, `redis` is re-fetched inside the loop for each ministry type, which is unnecessary but not a bug.
+
+9. **api/census.py**: The `_demographics_cache_set` eviction policy removes the oldest key (FIFO), not the least-recently-used key. This is a simple cache, not LRU.
+
+10. **modules/elder_care.py:489**: `workforce` MetricScore has `weight=0` and `rounded_workforce` can be `None`, but `MetricScore.score` expects `int`. Passing `None` there when `rounded_workforce is None` could be a type issue though it's guarded by the conditional.

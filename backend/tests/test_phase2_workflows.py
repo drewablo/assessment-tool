@@ -1,0 +1,118 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pytest
+
+from main import (
+    _facility_feasibility_adjustments,
+    _phase1_decision_pathway,
+    _PORTFOLIO_WORKSPACES,
+    add_portfolio_compare_snapshot,
+    create_portfolio_workspace,
+)
+from models.schemas import (
+    AnalysisRequest,
+    CompareAnalysisRequest,
+    CompareAnalysisResponse,
+    CompareAnalysisSummary,
+    FacilityProfile,
+    PortfolioWorkspaceCreateRequest,
+)
+
+
+class _Score:
+    def __init__(self, overall):
+        self.overall = overall
+        self.stage2 = None
+
+
+class _Result:
+    def __init__(self, score):
+        self.feasibility_score = _Score(score)
+        self.demographics = type("_Demographics", (), {"data_confidence": "medium"})()
+
+
+def test_facility_feasibility_adjustments_penalize_constraints():
+    adjustment, risks, validations = _facility_feasibility_adjustments(
+        AnalysisRequest(
+            school_name="X",
+            address="123 Main St",
+            ministry_type="housing",
+            facility_profile=FacilityProfile(
+                building_square_footage=9000,
+                deferred_maintenance_estimate=1_200_000,
+                zoning_use_constraints=["Special use permit"],
+                accessibility_constraints=["No elevator"],
+                sponsor_operator_capacity="low",
+            ),
+        )
+    )
+
+    assert adjustment < 0
+    assert risks
+    assert validations
+
+
+def test_phase1_pathway_includes_partner_assessment_when_partner_selected():
+    result = _Result(50)
+    request = AnalysisRequest(
+        school_name="X",
+        address="123 Main St",
+        ministry_type="schools",
+        facility_profile=FacilityProfile(sponsor_operator_capacity="low"),
+    )
+
+    recommendation = _phase1_decision_pathway(result, request)
+
+    assert recommendation.recommended_pathway == "partner"
+    assert recommendation.partner_assessment is not None
+    assert recommendation.partner_assessment.mission_alignment_score >= 70
+
+
+@pytest.mark.asyncio
+async def test_portfolio_workspace_create_and_add_snapshot(monkeypatch):
+    _PORTFOLIO_WORKSPACES.clear()
+
+    workspace = await create_portfolio_workspace(
+        PortfolioWorkspaceCreateRequest(
+            engagement_name="Springfield Portfolio",
+            client_name="St. Mark Province",
+            candidate_locations=[{"name": "North Site", "address": "1 Main St"}],
+            scenario_sets=[{"name": "Base", "assumptions": {"occupancy": 0.92}}],
+        )
+    )
+
+    async def fake_analyze_compare(_request):
+        return CompareAnalysisResponse(
+            school_name="North Site",
+            analysis_address="1 Main St",
+            compared_ministry_types=["schools", "housing"],
+            results=[
+                CompareAnalysisSummary(
+                    ministry_type="schools",
+                    overall_score=72,
+                    scenario_conservative=61,
+                    scenario_optimistic=82,
+                    recommendation="Proceed",
+                    recommendation_detail="Good fit",
+                    recommended_pathway="transform",
+                )
+            ],
+        )
+
+    monkeypatch.setattr("main.analyze_compare", fake_analyze_compare)
+
+    updated = await add_portfolio_compare_snapshot(
+        workspace.workspace_id,
+        CompareAnalysisRequest(
+            school_name="North Site",
+            address="1 Main St",
+            ministry_types=["schools", "housing"],
+        ),
+    )
+
+    assert updated.workspace_id == workspace.workspace_id
+    assert len(updated.compare_snapshots) == 1
+    assert updated.compare_snapshots[0].results[0].recommended_pathway == "transform"

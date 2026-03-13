@@ -1,0 +1,10 @@
+diff a/docker-compose.yml b/docker-compose.yml	(rejected hunks)
+@@ -71,6 +71,8 @@ services:
+     depends_on:
+       db:
+         condition: service_healthy
++      redis:
++        condition: service_healthy
+ 
+ volumes:
+   pgdata:

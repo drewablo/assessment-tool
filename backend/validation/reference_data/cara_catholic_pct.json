@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "source": "CARA / Georgetown Frequently Requested Church Statistics",
+    "url": "https://cara.georgetown.edu/frequently-requested-church-statistics/",
+    "retrieved_at": "2026-03-04",
+    "base_year": "2024",
+    "notes": "Manually curated snapshot used when live fetch is unavailable. Values are decimal shares (0-1)."
+  },
+  "values": {
+    "CT": 0.43, "RI": 0.42, "MA": 0.40, "NJ": 0.40, "NY": 0.37,
+    "PA": 0.32, "IL": 0.32, "CA": 0.30, "WI": 0.29, "MN": 0.29,
+    "MD": 0.28, "OH": 0.27, "MI": 0.27, "NH": 0.27, "ME": 0.27,
+    "NM": 0.34, "TX": 0.32, "AZ": 0.25, "CO": 0.25, "WA": 0.23,
+    "OR": 0.22, "FL": 0.26, "VA": 0.22, "GA": 0.15, "NC": 0.14,
+    "SC": 0.12, "AL": 0.10, "MS": 0.12, "TN": 0.11, "KY": 0.12,
+    "AR": 0.10, "LA": 0.32, "IN": 0.19, "IA": 0.24, "MO": 0.22,
+    "KS": 0.19, "NE": 0.25, "SD": 0.25, "ND": 0.27, "MT": 0.22,
+    "WY": 0.20, "ID": 0.14, "NV": 0.24, "UT": 0.09, "AK": 0.20,
+    "HI": 0.27, "DE": 0.32, "VT": 0.27, "WV": 0.10, "OK": 0.11,
+    "DC": 0.25
+  }
+}

@@ -1,0 +1,136 @@
+diff a/backend/tests/test_cache_resilience.py b/backend/tests/test_cache_resilience.py	(rejected hunks)
+@@ -40,7 +40,10 @@ class _Result:
+ 
+ @pytest.mark.asyncio
+ async def test_compare_uses_cached_analysis_when_available(monkeypatch):
++    geocode_calls = {"count": 0}
++
+     async def fake_geocode(_address):
++        geocode_calls["count"] += 1
+         return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+ 
+     run_calls = []
+@@ -73,6 +76,123 @@ async def test_compare_uses_cached_analysis_when_available(monkeypatch):
+ 
+     assert len(response.results) == 2
+     assert run_calls == ["housing"]
++    assert geocode_calls["count"] == 1
++
++
++@pytest.mark.asyncio
++async def test_compare_repeated_requests_skip_geocode_when_second_request_is_all_cache_hits(monkeypatch):
++    geocode_calls = {"count": 0}
++
++    async def fake_geocode(_address):
++        geocode_calls["count"] += 1
++        return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
++
++    run_calls = []
++
++    async def fake_run(_location, request):
++        run_calls.append(request.ministry_type)
++        return _Result(request.ministry_type, 60)
++
++    monkeypatch.setattr(main, "geocode_address", fake_geocode)
++    monkeypatch.setattr(main, "_run_analysis", fake_run)
++
++    monkeypatch.setattr(main.AnalysisResponse, "model_validate_json", staticmethod(lambda _payload: _Result("schools", 90)))
++    fake_redis = _FakeRedis()
++
++    async def fake_get_redis():
++        return fake_redis
++
++    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
++
++    req = CompareAnalysisRequest(
++        school_name="X",
++        address="123 Main",
++        ministry_types=["schools"],
++    )
++
++    await main.analyze_compare(req)
++    await main.analyze_compare(req)
++
++    # First request computes and caches; second request is cache hit.
++    assert run_calls == ["schools"]
++    # Geocoder runs only on first request (cache miss) and is skipped on second all-hit request.
++    assert geocode_calls["count"] == 1
++
++
++@pytest.mark.asyncio
++async def test_compare_all_cached_ministries_skip_geocode(monkeypatch):
++    async def fail_geocode(_address):
++        raise AssertionError("geocode should not run when all ministry results are cached")
++
++    monkeypatch.setattr(main, "geocode_address", fail_geocode)
++    async def fail_run(*_args, **_kwargs):
++        raise AssertionError("run_analysis should not run")
++
++    monkeypatch.setattr(main, "_run_analysis", fail_run)
++
++    req = CompareAnalysisRequest(
++        school_name="X",
++        address="123 Main",
++        ministry_types=["schools", "housing"],
++    )
++
++    schools_key = main._cache_key(AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools"))
++    housing_key = main._cache_key(AnalysisRequest(school_name="X", address="123 Main", ministry_type="housing"))
++
++    monkeypatch.setattr(main.AnalysisResponse, "model_validate_json", staticmethod(lambda _payload: _Result("schools", 90)))
++    fake_redis = _FakeRedis({schools_key: "{}", housing_key: "{}"})
++
++    async def fake_get_redis():
++        return fake_redis
++
++    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
++
++    response = await main.analyze_compare(req)
++    assert len(response.results) == 2
++
++
++@pytest.mark.asyncio
++async def test_export_board_pack_recomputes_each_call_even_with_analysis_cache(monkeypatch):
++    geocode_calls = {"count": 0}
++    run_calls = {"count": 0}
++
++    async def fake_geocode(_address):
++        geocode_calls["count"] += 1
++        return {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
++
++    async def fake_run(_location, request):
++        run_calls["count"] += 1
++        return _Result(request.ministry_type, 60)
++
++    async def fake_enrich(result, _request):
++        result.trace_id = "t"
++        result.school_name = "X"
++        result.analysis_address = "123 Main"
++        result.board_report_pack = None
++        result.benchmark_narrative = None
++        result.data_freshness = None
++        return result
++
++    monkeypatch.setattr(main, "geocode_address", fake_geocode)
++    monkeypatch.setattr(main, "_run_analysis", fake_run)
++    monkeypatch.setattr(main, "_enrich_analysis_result", fake_enrich)
++
++    # Even when Redis has an analysis entry, export endpoint does not read it.
++    cached_req = AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools")
++    cached_key = main._cache_key(cached_req)
++    fake_redis = _FakeRedis({cached_key: "{}"})
++
++    async def fake_get_redis():
++        return fake_redis
++
++    monkeypatch.setattr(main, "_get_redis", fake_get_redis)
++
++    req = AnalysisRequest(school_name="X", address="123 Main", ministry_type="schools")
++    await main.export_board_pack(req)
++    await main.export_board_pack(req)
++
++    assert geocode_calls["count"] == 2
++    assert run_calls["count"] == 2
+ 
+ 
+ @pytest.mark.asyncio

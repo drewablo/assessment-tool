@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "retrieved_at": "2026-03-04"
+  },
+  "competition_waitlist": {
+    "source": "NCEA 2024-2025 Annual Statistical Report",
+    "national_waitlist_pct": 39.3,
+    "regional_waitlist_pct": {
+      "Northeast": 54.0,
+      "Midwest": 41.0,
+      "South": 24.0,
+      "West": 33.0
+    }
+  },
+  "cpi_u": {
+    "source": "BLS CPI-U annual averages",
+    "series_id": "CUUR0000SA0",
+    "annual_avg": {
+      "2017": 245.120,
+      "2022": 292.655
+    }
+  },
+  "survival_rates": {
+    "source": "CDC/NCHS life tables + SSA actuarial tables",
+    "annual_survival": {
+      "65_to_74": 0.980,
+      "75_plus": 0.952
+    }
+  },
+  "housing": {
+    "hud_affordable_to_burdened_ratio_national": 0.58,
+    "hud_notes": "Worst Case Housing Needs indicates persistent shortage; many metros below 0.5.",
+    "cost_burden_threshold_standard": 0.30
+  }
+}

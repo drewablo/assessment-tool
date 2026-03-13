@@ -1,0 +1,18 @@
+{
+  "metadata": {
+    "source": "NCES Digest of Education Statistics (Table 205.50 equivalent) + Condition of Education",
+    "url": "https://nces.ed.gov/programs/digest/",
+    "retrieved_at": "2026-03-04",
+    "notes": "Curated benchmark rates for private school enrollment by family income bracket. Percent values (0-100)."
+  },
+  "brackets": [
+    {"label": "< $20k", "min": 0, "max": 20000, "nces_pct": 3.8},
+    {"label": "$20k-$35k", "min": 20000, "max": 35000, "nces_pct": 5.1},
+    {"label": "$35k-$50k", "min": 35000, "max": 50000, "nces_pct": 7.0},
+    {"label": "$50k-$75k", "min": 50000, "max": 75000, "nces_pct": 10.5},
+    {"label": "$75k-$100k", "min": 75000, "max": 100000, "nces_pct": 14.2},
+    {"label": "$100k-$150k", "min": 100000, "max": 150000, "nces_pct": 19.8},
+    {"label": "$150k-$200k", "min": 150000, "max": 200000, "nces_pct": 24.5},
+    {"label": "$200k+", "min": 200000, "max": null, "nces_pct": 31.0}
+  ]
+}

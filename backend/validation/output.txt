@@ -1,0 +1,37 @@
+
+=== MODEL AUDIT SUMMARY ===
+Run date: 2026-03-04T21:31:09.759048+00:00
+
+Backtest table:
+Location | Expected | Actual | Pass? | Weak Component
+Naperville, IL (K-8) | >= 60 | 88 | PASS | competition: 64
+Wellesley, MA (K-8) | >= 60 | 87 | PASS | competition: 56
+Flourtown, PA (Girls HS) | >= 60 | 77 | PASS | competition: 48
+Omaha, NE (K-8) | >= 60 | 87 | PASS | competition: 54
+Miami, FL (K-8) | >= 60 | 84 | PASS | competition: 54
+St. Louis, MO (K-8) | >= 60 | 87 | PASS | competition: 55
+Rural Appalachia, WV (K-8) | <= 55 | 40 | PASS | market_size: 2
+Scranton, PA (K-8) | <= 55 | 73 | FAIL | competition: 60
+Inner-city Detroit, MI (K-8) | <= 55 | 69 | FAIL | income: 46
+Rural Mississippi (K-8) | <= 55 | 35 | PASS | competition: 17
+
+Assumption check statuses:
+- catholic_pct: OK
+- income_propensity: WATCH
+- school_choice_states: STALE
+- reference_enrollment: WATCH
+- competition_waitlist: WATCH
+- cpi_adjustment: OK
+- survival_rates: OK
+- lihtc_saturation: OK
+- cost_burden_threshold: OK
+
+Recommendations:
+- Backtest miss: Scranton, PA (K-8) expected <= 55 but scored 73; investigate competition (60).
+- Backtest miss: Inner-city Detroit, MI (K-8) expected <= 55 but scored 69; investigate income (46).
+- Income propensity for $150k-$200k differs by 6.5pp; consider recalibrating segment point.
+- Income propensity for $200k+ differs by 4.0pp; consider recalibrating segment point.
+- School choice state lists appear stale; add: IL, KS, ME, MT, NJ, NV, PR, VT.
+- Competition model may need region-specific validation weighting because waitlist prevalence varies materially by region.
+
+Saved JSON report to: /home/admin1/academy-feasibility-/backend/validation/model_audit_report.json

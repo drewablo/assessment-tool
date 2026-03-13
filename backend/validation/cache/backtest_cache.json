@@ -1,0 +1,222 @@
+{
+  "Naperville, IL (K-8)": {
+    "location": "Naperville, IL (K-8)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 88,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 64
+    },
+    "components": {
+      "market_size": 93,
+      "income": 100,
+      "competition": 64,
+      "family_density": 97
+    },
+    "catholic_school_count": 24,
+    "total_private_school_count": 86,
+    "state": "Illinois",
+    "county": "selected area",
+    "address": "120 MILL ST, NAPERVILLE, IL, 60540"
+  },
+  "Flourtown, PA (Girls HS)": {
+    "location": "Flourtown, PA (Girls HS)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 77,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 48
+    },
+    "components": {
+      "market_size": 74,
+      "income": 100,
+      "competition": 48,
+      "family_density": 97
+    },
+    "catholic_school_count": 17,
+    "total_private_school_count": 63,
+    "state": "Pennsylvania",
+    "county": "selected area",
+    "address": "120 W WISSAHICKON AVE, FLOURTOWN, PA, 19031"
+  },
+  "Omaha, NE (K-8)": {
+    "location": "Omaha, NE (K-8)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 87,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 54
+    },
+    "components": {
+      "market_size": 96,
+      "income": 100,
+      "competition": 54,
+      "family_density": 97
+    },
+    "catholic_school_count": 17,
+    "total_private_school_count": 32,
+    "state": "",
+    "county": "selected area",
+    "address": "Patrick Avenue, Omaha, Chicago Precinct, Douglas County, Nebraska, 68116, United States"
+  },
+  "Miami, FL (K-8)": {
+    "location": "Miami, FL (K-8)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 84,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 54
+    },
+    "components": {
+      "market_size": 89,
+      "income": 97,
+      "competition": 54,
+      "family_density": 97
+    },
+    "catholic_school_count": 21,
+    "total_private_school_count": 182,
+    "state": "Florida",
+    "county": "selected area",
+    "address": "8625 SW 84TH AVE, MIAMI, FL, 33143"
+  },
+  "St. Louis, MO (K-8)": {
+    "location": "St. Louis, MO (K-8)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 87,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 55
+    },
+    "components": {
+      "market_size": 95,
+      "income": 100,
+      "competition": 55,
+      "family_density": 97
+    },
+    "catholic_school_count": 47,
+    "total_private_school_count": 106,
+    "state": "Missouri",
+    "county": "selected area",
+    "address": "583 COEUR DEVILLE DR, SAINT LOUIS, MO, 63141"
+  },
+  "Rural Appalachia, WV (K-8)": {
+    "location": "Rural Appalachia, WV (K-8)",
+    "expected": "<= 55",
+    "cohort": "struggle",
+    "actual": 40,
+    "pass": true,
+    "weak_component": {
+      "name": "market_size",
+      "score": 2
+    },
+    "components": {
+      "market_size": 2,
+      "income": 54,
+      "competition": 47,
+      "family_density": 97
+    },
+    "catholic_school_count": 0,
+    "total_private_school_count": 1,
+    "state": "West Virginia",
+    "county": "selected area",
+    "address": "101 MAIN AVE, LOGAN, WV, 25601"
+  },
+  "Scranton, PA (K-8)": {
+    "location": "Scranton, PA (K-8)",
+    "expected": "<= 55",
+    "cohort": "struggle",
+    "actual": 73,
+    "pass": false,
+    "weak_component": {
+      "name": "competition",
+      "score": 60
+    },
+    "components": {
+      "market_size": 80,
+      "income": 62,
+      "competition": 60,
+      "family_density": 97
+    },
+    "catholic_school_count": 9,
+    "total_private_school_count": 19,
+    "state": "Pennsylvania",
+    "county": "selected area",
+    "address": "1600 FARR ST, SCRANTON, PA, 18504"
+  },
+  "Inner-city Detroit, MI (K-8)": {
+    "location": "Inner-city Detroit, MI (K-8)",
+    "expected": "<= 55",
+    "cohort": "struggle",
+    "actual": 69,
+    "pass": false,
+    "weak_component": {
+      "name": "income",
+      "score": 46
+    },
+    "components": {
+      "market_size": 87,
+      "income": 46,
+      "competition": 55,
+      "family_density": 91
+    },
+    "catholic_school_count": 13,
+    "total_private_school_count": 46,
+    "state": "",
+    "county": "selected area",
+    "address": "Martin Luther King Junior Boulevard, Detroit, Wayne County, Michigan, 48208, United States"
+  },
+  "Rural Mississippi (K-8)": {
+    "location": "Rural Mississippi (K-8)",
+    "expected": "<= 55",
+    "cohort": "struggle",
+    "actual": 35,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 17
+    },
+    "components": {
+      "market_size": 32,
+      "income": 22,
+      "competition": 17,
+      "family_density": 94
+    },
+    "catholic_school_count": 1,
+    "total_private_school_count": 7,
+    "state": "Mississippi",
+    "county": "selected area",
+    "address": "800 S THEOBALDS ST, GREENVILLE, MS, 38701"
+  },
+  "Wellesley, MA (K-8)": {
+    "location": "Wellesley, MA (K-8)",
+    "expected": ">= 60",
+    "cohort": "success",
+    "actual": 87,
+    "pass": true,
+    "weak_component": {
+      "name": "competition",
+      "score": 56
+    },
+    "components": {
+      "market_size": 96,
+      "income": 100,
+      "competition": 56,
+      "family_density": 97
+    },
+    "catholic_school_count": 22,
+    "total_private_school_count": 79,
+    "state": "Massachusetts",
+    "county": "selected area",
+    "address": "34 BENVENUE ST, WELLESLEY, MA, 02482"
+  }
+}

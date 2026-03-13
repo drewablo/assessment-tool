@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "source": "NCEA 2024-2025 Annual Statistical Report",
+    "retrieved_at": "2026-03-04"
+  },
+  "benchmarks": {
+    "k5": {"median": 190, "mode": 180, "iqr": [140, 240]},
+    "k8": {"median": 235, "mode": 220, "iqr": [170, 300]},
+    "high_school": {"median": 340, "mode": 320, "iqr": [240, 430]},
+    "k12": {"median": 390, "mode": 370, "iqr": [280, 500]}
+  }
+}

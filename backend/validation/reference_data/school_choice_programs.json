@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "source": "NCEA 2024-2025 report + EdChoice program tracker",
+    "url": "https://www.edchoice.org/school-choice/programs/",
+    "retrieved_at": "2026-03-04"
+  },
+  "strong_choice_states": ["AZ", "FL", "IA", "IN", "OH", "OK"],
+  "established_choice_states": [
+    "AR", "CO", "GA", "ID", "IL", "KS", "KY", "LA", "MD", "ME", "MN", "MS", "MT",
+    "NC", "NH", "NJ", "NV", "PA", "PR", "SC", "TN", "UT", "VA", "VT", "WI", "WV"
+  ],
+  "voucher_amounts": {
+    "FL": {"avg_voucher_usd": 8200, "avg_tuition_usd": 9600},
+    "OH": {"avg_voucher_usd": 7600, "avg_tuition_usd": 9200},
+    "IN": {"avg_voucher_usd": 6400, "avg_tuition_usd": 8800}
+  }
+}

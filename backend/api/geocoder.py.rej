@@ -1,0 +1,10 @@
+diff a/backend/api/geocoder.py b/backend/api/geocoder.py	(rejected hunks)
+@@ -41,7 +41,7 @@ def _cache_set(key: str, payload: dict | None) -> None:
+     _GEOCODE_CACHE[key] = (datetime.now(timezone.utc) + timedelta(seconds=_GEOCODE_CACHE_TTL_SECONDS), payload)
+ 
+ async def geocode_address(address: str) -> Optional[dict]:
+-    # REVIEW[CACHE]: Geocoding is always live and uncached, so repeated analyses for the same address re-hit the Census geocoder each time.
++    # REVIEW[CACHE]: Geocoding uses an in-process TTL cache; cache entries are not shared across workers/instances.
+     """
+     Geocode an address using the Census Bureau's free Geocoder API.
+     Returns lat/lon plus county and state FIPS codes needed for ACS queries.
