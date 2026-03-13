@@ -82,6 +82,8 @@ export interface AnalysisHistoryRecord {
   created_at: string;
 }
 
+export type RunMode = "live_only" | "db_with_fallback" | "db_strict";
+
 export interface AnalysisRequest {
   school_name: string;
   address: string;
@@ -97,6 +99,7 @@ export interface AnalysisRequest {
   min_mds_overall_rating?: 1 | 2 | 3 | 4 | 5;
   stage2_inputs?: Stage2Inputs;
   facility_profile?: FacilityProfile;
+  run_mode?: RunMode;
 }
 
 
@@ -423,7 +426,50 @@ export type ScoringWeightsResponse = {
   [key: string]: unknown;
 };
 
+
+export interface DataDependencyStatus {
+  dataset: string;
+  required: boolean;
+  baseline_blocking: boolean;
+  affects_confidence: boolean;
+  export_blocking_in_strict: boolean;
+  available: boolean;
+  row_count: number;
+  note?: string | null;
+}
+
+export interface FallbackSummary {
+  used: boolean;
+  notes: string[];
+}
+
+export interface ConfidenceSummary {
+  level: "high" | "medium" | "low";
+  contributors: string[];
+}
+
+export interface ExportReadiness {
+  ready: boolean;
+  status: "ready" | "warning" | "blocked";
+  reasons: string[];
+}
+
+export interface SectionExplanation {
+  section: string;
+  inputs_used: string[];
+  inputs_missing: string[];
+  fallback_used: string[];
+  confidence_impact: "none" | "low" | "medium" | "high";
+}
 export interface AnalysisResponse {
+  run_mode: RunMode;
+  catchment_mode: "isochrone" | "radius";
+  outcome: "success" | "degraded_success" | "strict_mode_blocked" | "upstream_unavailable" | "export_blocked_readiness";
+  fallback_summary: FallbackSummary;
+  confidence_summary: ConfidenceSummary;
+  data_dependencies: DataDependencyStatus[];
+  export_readiness: ExportReadiness;
+  section_explanations: SectionExplanation[];
   school_name: string;
   ministry_type: MinistryType;
   analysis_address: string;

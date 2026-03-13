@@ -21,6 +21,7 @@ const DB_ENABLED = (process.env.NEXT_PUBLIC_USE_DB || "").toLowerCase() === "tru
 const PREFILL_ANALYSIS_KEY = "intelligence_prefill_analysis";
 
 export default function HomePage() {
+  const [lane, setLane] = useState<"quick_screen" | "deep_review">("quick_screen");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
@@ -158,6 +159,27 @@ export default function HomePage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
+              <div className="mb-4 inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+                <button
+                  type="button"
+                  onClick={() => setLane("quick_screen")}
+                  className={`px-3 py-2 ${lane === "quick_screen" ? "bg-navy-700 text-white" : "bg-white text-gray-700"}`}
+                >
+                  Quick Screen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLane("deep_review")}
+                  className={`px-3 py-2 ${lane === "deep_review" ? "bg-navy-700 text-white" : "bg-white text-gray-700"}`}
+                >
+                  Deep Review
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">
+                {lane === "quick_screen"
+                  ? "Quick Screen prioritizes speed and directional repeatability."
+                  : "Deep Review supports expanded controls and board-ready export workflows."}
+              </p>
               <AnalysisForm
                 onSubmit={handleSubmit}
                 loading={loading}

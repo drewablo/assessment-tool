@@ -81,7 +81,7 @@ async def test_run_analysis_falls_back_to_live_demographics_when_db_empty(monkey
     )
     location = {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
 
-    result = await main._run_analysis(location, request)
+    result, context = await main._run_analysis(location, request)
 
     assert result.feasibility_score.overall == 70
 
@@ -146,6 +146,6 @@ async def test_run_analysis_uses_db_demographics_when_available(monkeypatch):
     )
     location = {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
 
-    result = await main._run_analysis(location, request)
+    result, context = await main._run_analysis(location, request)
 
     assert result.feasibility_score.overall == 70
