@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, List, Literal, Optional
 
 
@@ -450,6 +450,8 @@ class PortfolioWorkspaceResponse(BaseModel):
 
 
 class AnalysisResponse(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     school_name: str
     ministry_type: Literal["schools", "housing", "elder_care"] = "schools"
     analysis_address: str

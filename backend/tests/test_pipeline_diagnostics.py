@@ -23,8 +23,9 @@ def test_pipeline_diagnostics_flags_empty_tables_and_missing_runs():
     assert readiness_status == "not_ready"
     assert any("Table 'census_tracts' has 0 rows" in d for d in diagnostics)
     assert any("Table 'schools' has 0 rows" in d for d in diagnostics)
-    assert any("Pipeline 'census_acs' has never completed successfully" in d for d in diagnostics)
-    assert any("Pipeline 'hud_lihtc_property' is stale" in d for d in diagnostics)
+    # census_acs has no run AND its table is empty → blocking
+    assert any("census_acs" in d and "empty" in d for d in diagnostics)
+    assert any("stale" in d.lower() for d in diagnostics)
     assert any("recent failure" in d for d in diagnostics)
 
 
@@ -128,3 +129,123 @@ def test_pipeline_diagnostics_tenant_and_qct_are_optional_for_readiness():
     assert readiness_status == "ready_with_fallbacks"
     assert any("Optional enrichment table 'hud_lihtc_tenant' has 0 rows" in d for d in diagnostics)
     assert any("Optional enrichment table 'hud_qct_dda' has 0 rows" in d for d in diagnostics)
+
+
+# --- New tests for data-present-but-no-pipeline-run scenario ---
+
+
+def test_pipeline_diagnostics_ready_no_tracking_when_data_present_but_no_runs():
+    """Tables have data but no pipeline runs recorded → ready_no_tracking, not blocked."""
+    counts = {
+        "census_tracts": 11227,
+        "schools": 20923,
+        "elder_care_facilities": 14710,
+        "housing_projects": 0,
+        "hud_lihtc_property": 51846,
+        "hud_lihtc_tenant": 4804,
+        "hud_qct_dda": 0,
+    }
+    # All pipelines report no success
+    pipelines = {
+        name: {
+            "last_success": None,
+            "freshness_status": "unknown",
+            "last_failure": {"error_message": None},
+        }
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]
+    }
+
+    diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
+
+    # DB is READY — data exists in all required tables
+    assert ready is True
+    # But pipeline tracking is missing
+    assert readiness_status == "ready_no_tracking"
+    # Should NOT contain blocking diagnostics about REQUIRED tables
+    assert not any("Table 'census_tracts' has 0 rows" in d for d in diagnostics)
+    assert not any("Table 'schools' has 0 rows" in d for d in diagnostics)
+    assert not any("Table 'elder_care_facilities' has 0 rows" in d for d in diagnostics)
+    # Should contain tracking warnings for required pipelines
+    assert any("no recorded successful run" in d and "census_acs" in d for d in diagnostics)
+    assert any("no recorded successful run" in d and "cms_elder_care" in d for d in diagnostics)
+    assert any("no recorded successful run" in d and "hud_lihtc_property" in d for d in diagnostics)
+
+
+def test_pipeline_diagnostics_not_ready_when_required_table_empty_regardless_of_pipeline_run():
+    """Even if a pipeline has run, if its table is empty, it's not ready."""
+    counts = {
+        "census_tracts": 0,
+        "schools": 456,
+        "elder_care_facilities": 10,
+        "housing_projects": 0,
+        "hud_lihtc_property": 12,
+        "hud_lihtc_tenant": 0,
+        "hud_qct_dda": 0,
+    }
+    pipelines = {
+        name: {
+            "last_success": "2026-01-01T00:00:00+00:00",
+            "freshness_status": "fresh",
+            "last_failure": {"error_message": None},
+        }
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"]
+    }
+
+    diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
+
+    assert ready is False
+    assert readiness_status == "not_ready"
+    assert any("Table 'census_tracts' has 0 rows" in d for d in diagnostics)
+
+
+def test_pipeline_diagnostics_stale_pipeline_is_warning_not_blocking():
+    """A stale pipeline should produce a warning but not block readiness."""
+    counts = {
+        "census_tracts": 123,
+        "schools": 456,
+        "elder_care_facilities": 10,
+        "housing_projects": 0,
+        "hud_lihtc_property": 12,
+        "hud_lihtc_tenant": 0,
+        "hud_qct_dda": 0,
+    }
+    pipelines = {
+        "census_acs": {"last_success": "2025-01-01T00:00:00+00:00", "freshness_status": "stale", "last_failure": {"error_message": None}},
+        "nces_pss": {"last_success": "2026-01-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "cms_elder_care": {"last_success": "2026-01-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "hud_lihtc_property": {"last_success": "2026-01-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+    }
+
+    diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
+
+    assert ready is True
+    assert any("stale" in d.lower() for d in diagnostics)
+
+
+def test_pipeline_diagnostics_qct_empty_does_not_block_when_lihtc_property_has_data():
+    """Missing QCT/DDA (optional enrichment) should not block when LIHTC property data exists."""
+    counts = {
+        "census_tracts": 123,
+        "schools": 456,
+        "elder_care_facilities": 10,
+        "housing_projects": 0,
+        "hud_lihtc_property": 51846,
+        "hud_lihtc_tenant": 4804,
+        "hud_qct_dda": 0,
+    }
+    pipelines = {
+        name: {
+            "last_success": "2026-01-01T00:00:00+00:00",
+            "freshness_status": "fresh",
+            "last_failure": {"error_message": None},
+        }
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"]
+    }
+
+    diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
+
+    assert ready is True
+    # Optional enrichment warning present
+    assert any("hud_qct_dda" in d for d in diagnostics)
+    # But not blocking
+    assert readiness_status == "ready_with_fallbacks"

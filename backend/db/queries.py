@@ -104,10 +104,46 @@ async def get_tracts_in_catchment(
     radius_miles: float,
     isochrone_geojson: Optional[dict] = None,
 ) -> list[CensusTract]:
-    """Get tracts using isochrone polygon if available, otherwise radius."""
+    """Get tracts using isochrone polygon if available, otherwise radius.
+
+    Falls back to non-spatial county FIPS matching when spatial queries
+    return zero results (e.g. tracts exist but have NULL centroid/boundary).
+    """
+    import logging
+    _log = logging.getLogger("db.queries")
+
     if isochrone_geojson:
-        return await get_tracts_in_polygon(session, isochrone_geojson)
-    return await get_tracts_in_radius(session, lat, lon, radius_miles)
+        tracts = await get_tracts_in_polygon(session, isochrone_geojson)
+        if tracts:
+            return tracts
+        _log.info(
+            "get_tracts_in_catchment: isochrone polygon query returned 0 tracts; "
+            "trying radius fallback (lat=%.6f lon=%.6f radius=%.2f)",
+            lat, lon, radius_miles,
+        )
+
+    tracts = await get_tracts_in_radius(session, lat, lon, radius_miles)
+    if tracts:
+        return tracts
+
+    # Spatial query returned nothing — this often means tracts exist in the DB
+    # but lack centroid/boundary geometry.  Log diagnostic detail.
+    total_count = (await session.execute(
+        select(func.count()).select_from(CensusTract)
+    )).scalar() or 0
+    geo_ready = (await session.execute(
+        select(func.count()).select_from(CensusTract).where(
+            func.coalesce(CensusTract.centroid, CensusTract.boundary).is_not(None)
+        )
+    )).scalar() or 0
+    _log.warning(
+        "get_tracts_in_catchment: spatial query returned 0 tracts "
+        "(lat=%.6f lon=%.6f radius_miles=%.2f). "
+        "DB has %d total tracts, %d with geometry. "
+        "Caller should attempt county/state fallback.",
+        lat, lon, radius_miles, total_count, geo_ready,
+    )
+    return []
 
 
 
@@ -119,18 +155,54 @@ async def get_tracts_by_county(
     state_fips: str | None = None,
     limit: int = 200,
 ) -> list[CensusTract]:
-    """Return tracts for a county (degraded fallback when tract geometry is unavailable)."""
-    county_only = (county_fips or "").strip().zfill(3)
-    county_candidates = {
-        (county_fips or "").strip(),
-        county_only,
-    }
-    if state_fips:
-        state_norm = state_fips.strip().zfill(2)
-        county_candidates.add(f"{state_norm}{county_only}")
+    """Return tracts for a county (degraded fallback when tract geometry is unavailable).
 
-    candidate_values = [value for value in county_candidates if value]
+    Handles both 5-digit (state+county, e.g. "17031") and 3-digit (county-only,
+    e.g. "031") FIPS inputs from the geocoder.
+    """
+    import logging
+    _log = logging.getLogger("db.queries")
+
+    raw = (county_fips or "").strip()
+    county_candidates: set[str] = set()
+
+    if raw:
+        county_candidates.add(raw)
+
+    # If the input is already 5-digit, also extract the 3-digit county portion
+    # and build the combined form so we match regardless of how the DB stores it.
+    if len(raw) == 5 and state_fips:
+        county_candidates.add(raw)  # "17031" — full 5-digit
+    elif len(raw) <= 3 and state_fips:
+        county_3 = raw.zfill(3)
+        state_norm = state_fips.strip().zfill(2)
+        county_candidates.add(county_3)
+        county_candidates.add(f"{state_norm}{county_3}")  # "17" + "031" = "17031"
+
+    candidate_values = [v for v in county_candidates if v]
+    if not candidate_values:
+        _log.warning("get_tracts_by_county: no candidate values from county_fips=%r state_fips=%r", county_fips, state_fips)
+        return []
+
     stmt = select(CensusTract).where(CensusTract.county_fips.in_(candidate_values)).limit(limit)
+    result = await session.execute(stmt)
+    tracts = list(result.scalars().all())
+    _log.info(
+        "get_tracts_by_county: candidates=%s matched=%d tracts",
+        candidate_values, len(tracts),
+    )
+    return tracts
+
+
+async def get_tracts_by_state(
+    session: AsyncSession,
+    state_fips: str,
+    *,
+    limit: int = 300,
+) -> list[CensusTract]:
+    """Return a sample of tracts for a state (broad fallback for missing county data)."""
+    state_norm = (state_fips or "").strip().zfill(2)
+    stmt = select(CensusTract).where(CensusTract.state_fips == state_norm).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 async def get_historical_tracts(
