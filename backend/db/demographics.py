@@ -3,6 +3,7 @@
 Replaces the live Census API call in api/census.py with a DB-backed version.
 """
 
+import logging
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import CensusTract, CensusTractHistory
 from db.queries import get_historical_tracts, get_tracts_by_county, get_tracts_in_catchment
 
+logger = logging.getLogger("db.demographics")
 
 # CARA state-level Catholic percentage (same as v1)
 CARA_CATHOLIC_PCT = {
@@ -54,10 +56,24 @@ async def aggregate_demographics(
 
     used_county_fallback = False
     if not tracts and county_fips:
-        tracts = await get_tracts_by_county(session, county_fips)
+        tracts = await get_tracts_by_county(session, county_fips, state_fips=state_fips)
         used_county_fallback = bool(tracts)
+        logger.info(
+            "Census catchment fallback lookup county_fips=%s state_fips=%s tract_hits=%s",
+            county_fips,
+            state_fips,
+            len(tracts),
+        )
 
     if not tracts:
+        logger.warning(
+            "Census catchment lookup returned zero tracts (lat=%.6f lon=%.6f radius_miles=%.2f state_fips=%s county_fips=%s)",
+            lat,
+            lon,
+            radius_miles,
+            state_fips,
+            county_fips,
+        )
         return _empty_demographics(state_fips)
 
     tract_geoids = [t.geoid for t in tracts if t.geoid]

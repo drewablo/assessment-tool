@@ -287,7 +287,6 @@ async def _ingest_pss_async():
                 total_upserted += len(batch)
 
         async with async_session_factory() as session:
-            run = await start_pipeline_run(session, "nces_pss")
             await finish_pipeline_run(
                 session, run,
                 status="success",
@@ -301,7 +300,6 @@ async def _ingest_pss_async():
     except Exception as e:
         logger.error(f"PSS ingestion failed: {e}")
         async with async_session_factory() as session:
-            run = await start_pipeline_run(session, "nces_pss")
             await finish_pipeline_run(session, run, status="failed", error_message=str(e))
             await session.commit()
         raise

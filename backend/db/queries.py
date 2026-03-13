@@ -116,10 +116,21 @@ async def get_tracts_by_county(
     session: AsyncSession,
     county_fips: str,
     *,
+    state_fips: str | None = None,
     limit: int = 200,
 ) -> list[CensusTract]:
     """Return tracts for a county (degraded fallback when tract geometry is unavailable)."""
-    stmt = select(CensusTract).where(CensusTract.county_fips == county_fips).limit(limit)
+    county_only = (county_fips or "").strip().zfill(3)
+    county_candidates = {
+        (county_fips or "").strip(),
+        county_only,
+    }
+    if state_fips:
+        state_norm = state_fips.strip().zfill(2)
+        county_candidates.add(f"{state_norm}{county_only}")
+
+    candidate_values = [value for value in county_candidates if value]
+    stmt = select(CensusTract).where(CensusTract.county_fips.in_(candidate_values)).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
 async def get_historical_tracts(

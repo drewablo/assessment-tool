@@ -394,15 +394,14 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
                 logger.info(f"State {st}: {processed} tracts processed, {upserted} upserted")
 
     async with async_session_factory() as session:
-        run = await start_pipeline_run(session, "census_acs")
         await finish_pipeline_run(
             session,
             run,
-            status="success" if not errors else "partial",
+            status="success" if total_upserted > 0 else "failed",
             records_processed=total_processed,
             records_inserted=total_upserted,
             error_message="; ".join(errors) if errors else None,
-            metadata={"vintage": vintage, "states": len(target_states)},
+            metadata={"vintage": vintage, "states": len(target_states), "errors_count": len(errors)},
         )
         await session.commit()
 

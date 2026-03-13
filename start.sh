@@ -350,7 +350,9 @@ import json, sys
 p=sys.argv[1]
 data=json.load(open(p))
 ready = bool(data.get('db_ready_for_analysis'))
+readiness_status = data.get('readiness_status') or ('ready' if ready else 'not_ready')
 print(f"db_ready_for_analysis={ready}")
+print(f"readiness_status={readiness_status}")
 print("record_counts:")
 for k,v in (data.get('record_counts') or {}).items():
     print(f"  - {k}: {v}")
