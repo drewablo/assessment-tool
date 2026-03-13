@@ -9,7 +9,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import CensusTract, CensusTractHistory
-from db.queries import get_historical_tracts, get_tracts_by_county, get_tracts_in_catchment
+from db.queries import get_historical_tracts, get_tracts_by_county, get_tracts_by_state, get_tracts_in_catchment
 
 logger = logging.getLogger("db.demographics")
 
@@ -55,19 +55,31 @@ async def aggregate_demographics(
     tracts = await get_tracts_in_catchment(session, lat, lon, radius_miles, isochrone_geojson)
 
     used_county_fallback = False
+    used_state_fallback = False
     if not tracts and county_fips:
         tracts = await get_tracts_by_county(session, county_fips, state_fips=state_fips)
         used_county_fallback = bool(tracts)
         logger.info(
-            "Census catchment fallback lookup county_fips=%s state_fips=%s tract_hits=%s",
+            "Census catchment county fallback county_fips=%s state_fips=%s tract_hits=%s",
             county_fips,
+            state_fips,
+            len(tracts),
+        )
+
+    if not tracts and state_fips:
+        tracts = await get_tracts_by_state(session, state_fips, limit=300)
+        used_state_fallback = bool(tracts)
+        logger.info(
+            "Census catchment state fallback state_fips=%s tract_hits=%s",
             state_fips,
             len(tracts),
         )
 
     if not tracts:
         logger.warning(
-            "Census catchment lookup returned zero tracts (lat=%.6f lon=%.6f radius_miles=%.2f state_fips=%s county_fips=%s)",
+            "Census catchment lookup returned zero tracts after all fallbacks "
+            "(lat=%.6f lon=%.6f radius_miles=%.2f state_fips=%s county_fips=%s). "
+            "This state may not have been ingested.",
             lat,
             lon,
             radius_miles,
@@ -210,7 +222,7 @@ async def aggregate_demographics(
         "families_with_children": families_with_children,
         "owner_occupied_pct": owner_pct,
         "estimated_catholic_pct": estimated_catholic_pct,
-        "data_geography": "county_fallback" if used_county_fallback else "tract",
+        "data_geography": "state_fallback" if used_state_fallback else ("county_fallback" if used_county_fallback else "tract"),
         "data_confidence": data_confidence,
         "tract_count": len(tracts),
         "income_brackets": income_brackets,

@@ -35,22 +35,24 @@ def resolve_run_mode(requested: str | None, use_db: bool) -> RunMode:
     return mode  # type: ignore[return-value]
 
 
-def summarize_dependencies(counts: dict[str, int] | None) -> list[dict]:
+def summarize_dependencies(counts: dict[str, int] | None) -> list["DataDependencyStatus"]:
+    from models.schemas import DataDependencyStatus
+
     counts = counts or {}
-    rows: list[dict] = []
+    rows: list[DataDependencyStatus] = []
     for key, rule in DEPENDENCY_REGISTRY.items():
         count = int(counts.get(key) or 0)
         rows.append(
-            {
-                "dataset": key,
-                "required": rule.required,
-                "baseline_blocking": rule.baseline_blocking,
-                "affects_confidence": rule.affects_confidence,
-                "export_blocking_in_strict": rule.export_blocking_in_strict,
-                "available": count > 0,
-                "row_count": count,
-                "note": rule.optional_note,
-            }
+            DataDependencyStatus(
+                dataset=key,
+                required=rule.required,
+                baseline_blocking=rule.baseline_blocking,
+                affects_confidence=rule.affects_confidence,
+                export_blocking_in_strict=rule.export_blocking_in_strict,
+                available=count > 0,
+                row_count=count,
+                note=rule.optional_note,
+            )
         )
     return rows
 

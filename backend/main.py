@@ -82,13 +82,33 @@ PIPELINE_FRESHNESS_TARGET_HOURS = {
 
 
 def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str], bool, str]:
-    """Build actionable DB-readiness diagnostics for operators."""
+    """Build actionable DB-readiness diagnostics for operators.
+
+    Readiness is determined by DATA PRESENCE in required tables, not pipeline
+    run history.  Pipeline tracking provides freshness/provenance signals but
+    missing runs must never block readiness when the underlying data exists.
+
+    Readiness levels:
+      ready               – all required data present, pipelines tracked
+      ready_with_fallbacks – required baseline data present, optional enrichments missing
+      ready_no_tracking   – required data present but pipeline provenance unavailable
+      not_ready           – one or more required tables are empty
+    """
     diagnostics: list[str] = []
     blocking_diagnostics: list[str] = []
+    tracking_warnings: list[str] = []
 
+    # --- Which pipelines map to which tables ---
+    pipeline_to_table = {
+        "census_acs": "census_tracts",
+        "nces_pss": "schools",
+        "cms_elder_care": "elder_care_facilities",
+        "hud_lihtc_property": "hud_lihtc_property",
+    }
     required_pipelines = {"census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"}
     optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda"}
 
+    # --- Check required table data presence (the real readiness gate) ---
     table_expectations = {
         "census_tracts": "census_acs",
         "schools": "nces_pss",
@@ -119,30 +139,54 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
             "Housing baseline remains available; QCT/DDA policy context will be skipped."
         )
 
-    for name in sorted(required_pipelines.union(optional_pipelines)):
+    # --- Check pipeline run history (freshness/provenance, not blocking) ---
+    for name in sorted(required_pipelines | optional_pipelines):
         info = pipelines.get(name) or {}
         freshness = info.get("freshness_status")
         last_success = info.get("last_success")
         last_failure = (info.get("last_failure") or {}).get("error_message")
 
+        # Resolve whether the *table* backing this pipeline has data.
+        backing_table = pipeline_to_table.get(name)
+        table_has_data = int(counts.get(backing_table or "", 0) or 0) > 0
+
         if not last_success:
-            target = blocking_diagnostics if name in required_pipelines else diagnostics
-            target.append(f"Pipeline '{name}' has never completed successfully.")
+            if table_has_data:
+                # Data exists but no pipeline run recorded — a tracking gap, not
+                # a readiness problem.  Do NOT add to blocking_diagnostics.
+                tracking_warnings.append(
+                    f"Pipeline '{name}' has no recorded successful run, but its "
+                    f"backing table has data. Pipeline tracking should be re-run "
+                    f"or the run log back-filled."
+                )
+            else:
+                # No data AND no pipeline run — surface on the appropriate list.
+                target = blocking_diagnostics if name in required_pipelines else diagnostics
+                target.append(f"Pipeline '{name}' has never completed successfully and its table is empty.")
         elif freshness == "stale":
-            target = blocking_diagnostics if name in required_pipelines else diagnostics
-            target.append(
-                f"Pipeline '{name}' is stale (freshness_status=stale). Trigger a refresh run."
-            )
+            msg = f"Pipeline '{name}' is stale (freshness_status=stale). Trigger a refresh run."
+            if name in required_pipelines:
+                diagnostics.append(msg)  # stale is a freshness concern, not blocking
+            else:
+                diagnostics.append(msg)
 
         if last_failure:
-            target = blocking_diagnostics if name in required_pipelines else diagnostics
-            target.append(
-                f"Pipeline '{name}' has recent failure: {str(last_failure)[:200]}"
+            diagnostics.append(
+                f"Pipeline '{name}' has a recent failure: {str(last_failure)[:200]}"
             )
 
-    all_diagnostics = [*blocking_diagnostics, *diagnostics]
+    all_diagnostics = [*blocking_diagnostics, *tracking_warnings, *diagnostics]
     db_ready_for_analysis = len(blocking_diagnostics) == 0
-    readiness_status = "ready" if not all_diagnostics else ("ready_with_fallbacks" if db_ready_for_analysis else "not_ready")
+
+    if not db_ready_for_analysis:
+        readiness_status = "not_ready"
+    elif tracking_warnings:
+        readiness_status = "ready_no_tracking"
+    elif diagnostics:
+        readiness_status = "ready_with_fallbacks"
+    else:
+        readiness_status = "ready"
+
     return all_diagnostics, db_ready_for_analysis, readiness_status
 
 
@@ -357,7 +401,7 @@ async def _build_data_freshness_metadata() -> DataFreshnessMetadata:
 def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, dependency_counts: dict | None, fallback_notes: list[str], strict_blockers: list[str]) -> AnalysisResponse:
     result.run_mode = run_mode
     result.catchment_mode = result.catchment_type
-    result.data_dependencies = [DataDependencyStatus.model_validate(row) for row in summarize_dependencies(dependency_counts)]
+    result.data_dependencies = summarize_dependencies(dependency_counts)
     result.fallback_summary = FallbackSummary(
         used=bool(fallback_notes),
         notes=fallback_notes,
@@ -376,7 +420,7 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
         level=confidence_level if confidence_level in {"high", "medium", "low"} else "medium",
         contributors=contributors,
     )
-    confidence_level_final = result.confidence_summary.level if hasattr(result.confidence_summary, "level") else "medium"
+    confidence_level_final = result.confidence_summary.level
 
     export_reasons = [row.dataset for row in result.data_dependencies if row.export_blocking_in_strict and not row.available]
     ready = len(export_reasons) == 0 and (confidence_level_final != "low")
@@ -1508,23 +1552,27 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
                 isochrone_geojson=isochrone_polygon,
             )
 
-        # Common docker misconfiguration: DB mode enabled but pipelines not populated.
-        # In that case aggregate_demographics returns tract_count=0 and analysis quality collapses.
+        # DB mode enabled but demographics lookup returned zero tracts —
+        # either pipelines not populated or this area was not ingested.
         if (demographics or {}).get("tract_count", 0) == 0:
+            data_geo = (demographics or {}).get("data_geography", "unknown")
             logger.warning(
-                "USE_DB=true but no census tract rows were found for catchment; "
-                "falling back to live Census API for this request. "
-                "lookup_context=(lat=%.6f lon=%.6f radius_miles=%.2f catchment_type=%s state_fips=%s county_fips=%s used_county_fallback=%s)",
+                "USE_DB=true but no census tract rows were found for catchment "
+                "after spatial+county+state fallbacks; falling back to live Census API. "
+                "lookup_context=(lat=%.6f lon=%.6f radius_miles=%.2f catchment_type=%s "
+                "state_fips=%s county_fips=%s data_geography=%s). "
+                "Likely cause: this state/county has not been ingested yet, or tracts "
+                "exist without centroid/boundary geometry.",
                 location["lat"],
                 location["lon"],
                 effective_radius,
                 catchment_type,
                 location["state_fips"],
                 location.get("county_fips"),
-                bool((demographics or {}).get("used_county_fallback")),
+                data_geo,
             )
             used_live_demographics_fallback = True
-            fallback_notes.append("DB demographics unavailable; used live Census API fallback.")
+            fallback_notes.append("DB demographics unavailable for this area; used live Census API fallback.")
 
     if (not USE_DB) or used_live_demographics_fallback:
         demographics = await get_demographics(
