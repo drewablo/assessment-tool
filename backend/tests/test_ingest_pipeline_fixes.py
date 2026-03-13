@@ -68,19 +68,21 @@ def test_elder_fetch_uses_valid_socrata_parameters(monkeypatch):
     assert captured["params"] == {"limit": 250, "offset": 1000}
 
 
-def test_census_feature_to_geometry_builds_multipolygon_and_geoid():
-    feature = {
-        "type": "Feature",
-        "properties": {"GEOID": "06001000100"},
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[-122.0, 37.0], [-121.0, 37.0], [-121.0, 38.0], [-122.0, 38.0], [-122.0, 37.0]]],
-        },
-    }
+def test_shapefile_record_to_geometry_builds_multipolygon():
+    """_shapefile_record_to_geometry converts a pyshp shape to MultiPolygon."""
+    from shapely.geometry import Polygon, MultiPolygon
+    import shapefile as pyshp
 
-    geoid = ingest_census._feature_geoid(feature)
-    geom = ingest_census._feature_to_geometry(feature)
+    # Create a mock pyshp shape with a Polygon geo_interface
+    class _MockShape:
+        shapeType = pyshp.POLYGON
+        @property
+        def __geo_interface__(self):
+            return {
+                "type": "Polygon",
+                "coordinates": [[(-122.0, 37.0), (-121.0, 37.0), (-121.0, 38.0), (-122.0, 38.0), (-122.0, 37.0)]],
+            }
 
-    assert geoid == "06001000100"
+    geom = ingest_census._shapefile_record_to_geometry(_MockShape())
     assert geom is not None
     assert geom.geom_type == "MultiPolygon"
