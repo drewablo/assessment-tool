@@ -245,6 +245,23 @@ async def _collect_db_data_health() -> dict:
         centroid_ready = int((await session.execute(select(func.count()).select_from(CensusTract).where(func.coalesce(CensusTract.centroid, func.ST_PointOnSurface(CensusTract.boundary)).is_not(None)))).scalar() or 0)
         hud_years = list((await session.execute(select(HudLihtcProperty.dataset_year).distinct().order_by(HudLihtcProperty.dataset_year.desc()).limit(5))).scalars().all())
 
+        # State coverage: which states have census tracts ingested
+        state_rows = (await session.execute(
+            select(CensusTract.state_fips, func.count()).group_by(CensusTract.state_fips).order_by(CensusTract.state_fips)
+        )).all()
+        ingested_states = {row[0]: row[1] for row in state_rows}
+
+    # All 50 states + DC
+    ALL_STATE_FIPS = {
+        "01", "02", "04", "05", "06", "08", "09", "10", "11", "12",
+        "13", "15", "16", "17", "18", "19", "20", "21", "22", "23",
+        "24", "25", "26", "27", "28", "29", "30", "31", "32", "33",
+        "34", "35", "36", "37", "38", "39", "40", "41", "42", "44",
+        "45", "46", "47", "48", "49", "50", "51", "53", "54", "55",
+        "56",
+    }
+    missing_states = sorted(ALL_STATE_FIPS - set(ingested_states.keys()))
+
     warnings = []
     if counts["census_tracts"] == 0:
         warnings.append("census_tracts is empty; demographics will fall back to live Census API.")
@@ -252,6 +269,13 @@ async def _collect_db_data_health() -> dict:
         warnings.append("census_tracts has no centroid-ready geometry (centroid/boundary); catchment queries will fail to use DB path.")
     elif null_centroid == counts["census_tracts"]:
         warnings.append("all census tracts have NULL centroid geometry; boundary-derived points will be used and centroids should be backfilled.")
+
+    if missing_states and counts["census_tracts"] > 0:
+        warnings.append(
+            f"Census data missing for {len(missing_states)} state(s): {', '.join(missing_states)}. "
+            f"Analyses in these states will fall back to live Census API. "
+            f"Run: ingest_acs_data(states={missing_states[:5]}{'...' if len(missing_states) > 5 else ''})"
+        )
 
     if counts["hud_lihtc_property"] == 0 and counts["competitors_housing"] > 0:
         warnings.append("normalized HUD tables are empty but legacy competitors_housing has rows; housing will use legacy DB path without HUD enrichment.")
@@ -271,6 +295,12 @@ async def _collect_db_data_health() -> dict:
         "null_boundary_rows": null_boundary,
         "centroid_ready_rows": centroid_ready,
         "hud_dataset_years": hud_years,
+        "census_state_coverage": {
+            "ingested_count": len(ingested_states),
+            "total_expected": len(ALL_STATE_FIPS),
+            "missing_fips": missing_states,
+            "ingested_fips": sorted(ingested_states.keys()),
+        },
         "warnings": warnings,
         "db_ready_for_analysis": len(warnings) == 0,
     }

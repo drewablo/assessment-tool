@@ -201,10 +201,28 @@ async def get_tracts_by_state(
     limit: int = 300,
 ) -> list[CensusTract]:
     """Return a sample of tracts for a state (broad fallback for missing county data)."""
+    import logging
+    _log = logging.getLogger("db.queries")
+
     state_norm = (state_fips or "").strip().zfill(2)
     stmt = select(CensusTract).where(CensusTract.state_fips == state_norm).limit(limit)
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    tracts = list(result.scalars().all())
+
+    if not tracts:
+        # Report which states ARE present so the user knows what to ingest
+        ingested = (await session.execute(
+            select(CensusTract.state_fips, func.count()).group_by(CensusTract.state_fips)
+        )).all()
+        ingested_states = sorted(row[0] for row in ingested)
+        _log.warning(
+            "get_tracts_by_state: state_fips=%s has 0 tracts in DB. "
+            "Ingested states (%d): %s. "
+            "Run census pipeline for this state: states=['%s']",
+            state_norm, len(ingested_states), ", ".join(ingested_states), state_norm,
+        )
+
+    return tracts
 async def get_historical_tracts(
     session: AsyncSession,
     geoids: list[str],
