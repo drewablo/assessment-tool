@@ -92,6 +92,40 @@ ACS_VARIABLES = {
 
 TIGER_TRACTS_ARCGIS = "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/Tracts_Blocks/MapServer/4/query"
 
+# Retry settings for Census API and TIGER ArcGIS
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16
+
+
+async def _retry_get(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> httpx.Response:
+    """GET with exponential-backoff retry on transient failures (timeout, 429, 5xx)."""
+    last_exc = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = await client.get(url, params=params, timeout=timeout)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "%s: HTTP %d on attempt %d/%d; retrying in %ds",
+                    label, resp.status_code, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt < _MAX_RETRIES:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "%s: %s on attempt %d/%d; retrying in %ds",
+                    label, type(exc).__name__, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise last_exc or RuntimeError(f"{label}: exhausted retries")
+
 
 async def _fetch_tiger_geometries_for_state(client: httpx.AsyncClient, state_fips: str) -> list[dict]:
     """Fetch TIGER tract geometries for a state from Census ArcGIS endpoint."""
@@ -110,11 +144,14 @@ async def _fetch_tiger_geometries_for_state(client: httpx.AsyncClient, state_fip
             "f": "geojson",
         }
         try:
-            resp = await client.get(TIGER_TRACTS_ARCGIS, params=params, timeout=120.0)
-            resp.raise_for_status()
+            resp = await _retry_get(
+                client, TIGER_TRACTS_ARCGIS,
+                params=params, timeout=120.0,
+                label=f"TIGER state={state_fips} offset={offset}",
+            )
             payload = resp.json()
         except Exception as exc:
-            logger.warning("Failed to fetch TIGER geometries for state %s at offset %s: %s", state_fips, offset, exc)
+            logger.error("Failed to fetch TIGER geometries for state %s at offset %s: %s", state_fips, offset, exc)
             break
 
         page = payload.get("features", []) if isinstance(payload, dict) else []
@@ -211,7 +248,10 @@ async def _fetch_acs_state(
     state_fips: str,
     vintage: str = "2022",
 ) -> list[dict]:
-    """Fetch ACS 5-Year data for all tracts in a state."""
+    """Fetch ACS 5-Year data for all tracts in a state.
+
+    Raises on failure so the caller can distinguish "no data" from "API error".
+    """
     var_list = ",".join(ACS_VARIABLES.keys())
     params = {
         "get": f"NAME,{var_list}",
@@ -223,15 +263,15 @@ async def _fetch_acs_state(
 
     url = f"{CENSUS_API_BASE}/{vintage}/acs/acs5"
 
-    try:
-        resp = await client.get(url, params=params, timeout=60.0)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        logger.warning(f"Failed to fetch ACS for state {state_fips}: {e}")
-        return []
+    resp = await _retry_get(
+        client, url,
+        params=params, timeout=90.0,
+        label=f"ACS state={state_fips}",
+    )
+    data = resp.json()
 
     if not data or len(data) < 2:
+        logger.warning("ACS state=%s returned empty/header-only response", state_fips)
         return []
 
     headers = data[0]
@@ -300,11 +340,17 @@ def _transform_tract(row: dict, vintage: str = "2022") -> dict:
         "population_below_poverty": _safe_int(mapped.get("population_below_poverty")),
         "income_cv": income_cv,
         "acs_vintage": vintage,
+        # Ensure geometry keys are always present (NULL until enriched)
+        "boundary": None,
+        "centroid": None,
     }
 
 
 async def _ingest_state(state_fips: str, vintage: str = "2022") -> tuple[int, int]:
-    """Ingest all tracts for one state. Returns (processed, upserted)."""
+    """Ingest all tracts for one state. Returns (fetched, geo_enriched).
+
+    Raises on ACS fetch failure so the orchestrator can track it as an error.
+    """
     async with httpx.AsyncClient() as client:
         rows = await _fetch_acs_state(client, state_fips, vintage)
 
@@ -323,12 +369,14 @@ async def _ingest_state(state_fips: str, vintage: str = "2022") -> tuple[int, in
         if geoid and geom is not None:
             geom_by_geoid[geoid] = geom
 
+    geo_enriched = 0
     for tract in tract_dicts:
         geom = geom_by_geoid.get(tract["geoid"])
         if geom is None:
             continue
         tract["boundary"] = from_shape(geom, srid=4326)
         tract["centroid"] = from_shape(Point(geom.representative_point().x, geom.representative_point().y), srid=4326)
+        geo_enriched += 1
 
     async with async_session_factory() as session:
         stmt = pg_insert(CensusTract).values(tract_dicts)
@@ -347,12 +395,18 @@ async def _ingest_state(state_fips: str, vintage: str = "2022") -> tuple[int, in
     if backfilled:
         logger.info("State %s: backfilled %s missing tract centroids from boundaries", state_fips, backfilled)
 
-    if geom_by_geoid:
-        logger.info("State %s: attached %s TIGER tract geometries", state_fips, len(geom_by_geoid))
-    else:
-        logger.warning("State %s: no TIGER geometries attached; centroid availability depends on existing boundary data", state_fips)
+    logger.info(
+        "State %s: %d tracts inserted, %d/%d with TIGER geometry",
+        state_fips, len(tract_dicts), geo_enriched, len(tract_dicts),
+    )
+    if geo_enriched == 0 and len(tract_dicts) > 0:
+        logger.warning(
+            "State %s: 0 TIGER geometries attached; all %d tracts have NULL centroid/boundary. "
+            "Spatial queries for this state will fail until geometry is available.",
+            state_fips, len(tract_dicts),
+        )
 
-    return len(rows), len(tract_dicts)
+    return len(tract_dicts), geo_enriched
 
 
 @celery_app.task(name="pipeline.ingest_census.ingest_acs_data", bind=True)
@@ -368,16 +422,25 @@ def ingest_acs_data(self, vintage: str = "2022", states: list[str] | None = None
 async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None = None):
     """Async implementation of Census ACS ingestion."""
     target_states = states or STATE_FIPS
-    total_processed = 0
-    total_upserted = 0
+    total_tracts = 0
+    total_geo = 0
     errors = []
+    succeeded_states = []
+    failed_states = []
+
+    if not CENSUS_API_KEY:
+        logger.warning(
+            "CENSUS_API_KEY is not set. Requests will be rate-limited by the Census Bureau. "
+            "Get a free key at https://api.census.gov/data/key_signup.html"
+        )
 
     async with async_session_factory() as session:
         run = await start_pipeline_run(session, "census_acs")
         await session.commit()
 
-    # Process states in batches of 5 to avoid overwhelming the Census API
-    batch_size = 5
+    # Process states sequentially in small batches.
+    # Batch size of 2 avoids Census API rate limits (especially without API key).
+    batch_size = 2 if not CENSUS_API_KEY else 5
     for i in range(0, len(target_states), batch_size):
         batch = target_states[i : i + batch_size]
         tasks = [_ingest_state(st, vintage) for st in batch]
@@ -386,28 +449,71 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
         for st, result in zip(batch, results):
             if isinstance(result, Exception):
                 errors.append(f"State {st}: {result}")
-                logger.error(f"Failed to ingest state {st}: {result}")
+                failed_states.append(st)
+                logger.error("FAILED to ingest state %s: %s", st, result)
             else:
-                processed, upserted = result
-                total_processed += processed
-                total_upserted += upserted
-                logger.info(f"State {st}: {processed} tracts processed, {upserted} upserted")
+                tracts, geo = result
+                total_tracts += tracts
+                total_geo += geo
+                if tracts > 0:
+                    succeeded_states.append(st)
+                else:
+                    failed_states.append(st)
+                    errors.append(f"State {st}: ACS returned 0 tracts (possible API issue)")
+                    logger.error("State %s: ACS returned 0 tracts — treating as failure", st)
+
+        # Brief pause between batches to respect rate limits
+        if i + batch_size < len(target_states):
+            await asyncio.sleep(1.0)
+
+    # Determine pipeline status
+    if len(failed_states) == 0:
+        status = "success"
+    elif len(succeeded_states) > 0:
+        status = "success"  # partial success — some states ingested
+    else:
+        status = "failed"
+
+    logger.info(
+        "Census ACS ingestion complete: %d tracts (%d with geometry) from %d/%d states. "
+        "Failed states (%d): %s",
+        total_tracts, total_geo, len(succeeded_states), len(target_states),
+        len(failed_states), ", ".join(failed_states) if failed_states else "none",
+    )
+
+    if failed_states:
+        logger.error(
+            "Re-run failed states with: "
+            "ingest_acs_data(states=%r)",
+            failed_states,
+        )
 
     async with async_session_factory() as session:
         await finish_pipeline_run(
             session,
             run,
-            status="success" if total_upserted > 0 else "failed",
-            records_processed=total_processed,
-            records_inserted=total_upserted,
+            status=status,
+            records_processed=total_tracts,
+            records_inserted=total_tracts,
             error_message="; ".join(errors) if errors else None,
-            metadata={"vintage": vintage, "states": len(target_states), "errors_count": len(errors)},
+            metadata={
+                "vintage": vintage,
+                "states_requested": len(target_states),
+                "states_succeeded": len(succeeded_states),
+                "states_failed": len(failed_states),
+                "failed_states": failed_states,
+                "total_tracts": total_tracts,
+                "tracts_with_geometry": total_geo,
+            },
         )
         await session.commit()
 
     return {
-        "processed": total_processed,
-        "upserted": total_upserted,
+        "total_tracts": total_tracts,
+        "tracts_with_geometry": total_geo,
+        "states_succeeded": len(succeeded_states),
+        "states_failed": len(failed_states),
+        "failed_states": failed_states,
         "errors": errors,
     }
 
@@ -419,7 +525,11 @@ async def ingest_historical(vintage: str = "2017", states: list[str] | None = No
 
     for state_fips in target_states:
         async with httpx.AsyncClient() as client:
-            rows = await _fetch_acs_state(client, state_fips, vintage)
+            try:
+                rows = await _fetch_acs_state(client, state_fips, vintage)
+            except Exception as exc:
+                logger.error("Historical ingest: failed to fetch state %s: %s", state_fips, exc)
+                continue
 
         if not rows:
             continue
