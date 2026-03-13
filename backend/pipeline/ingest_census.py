@@ -97,9 +97,13 @@ _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16
 
 
-async def _retry_get(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> httpx.Response:
-    """GET with exponential-backoff retry on transient failures (timeout, 429, 5xx)."""
-    last_exc = None
+async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> dict | list:
+    """GET with exponential-backoff retry; returns parsed JSON.
+
+    Retries on: HTTP 429/5xx, timeouts, connection errors, and non-JSON
+    responses (ArcGIS commonly returns 200 with empty/HTML body on errors).
+    """
+    last_exc: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             resp = await client.get(url, params=params, timeout=timeout)
@@ -112,7 +116,35 @@ async def _retry_get(client: httpx.AsyncClient, url: str, *, params: dict, timeo
                 await asyncio.sleep(wait)
                 continue
             resp.raise_for_status()
-            return resp
+
+            # ArcGIS often returns HTTP 200 with an HTML error page or empty
+            # body instead of JSON.  Detect this and retry.
+            content_type = resp.headers.get("content-type", "")
+            if "html" in content_type and "json" not in content_type:
+                wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                logger.warning(
+                    "%s: got HTML instead of JSON (content-type=%s) on attempt %d/%d; retrying in %ds",
+                    label, content_type, attempt + 1, _MAX_RETRIES + 1, wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            try:
+                return resp.json()
+            except ValueError as exc:
+                # Empty body or malformed JSON — retry
+                last_exc = exc
+                if attempt < _MAX_RETRIES:
+                    wait = _RETRY_BACKOFF_BASE * (2 ** attempt)
+                    body_preview = resp.text[:200] if resp.text else "(empty)"
+                    logger.warning(
+                        "%s: JSON decode failed on attempt %d/%d (body: %s); retrying in %ds",
+                        label, attempt + 1, _MAX_RETRIES + 1, body_preview, wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
+
         except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
             last_exc = exc
             if attempt < _MAX_RETRIES:
@@ -144,14 +176,14 @@ async def _fetch_tiger_geometries_for_state(client: httpx.AsyncClient, state_fip
             "f": "geojson",
         }
         try:
-            resp = await _retry_get(
+            payload = await _retry_get_json(
                 client, TIGER_TRACTS_ARCGIS,
                 params=params, timeout=120.0,
                 label=f"TIGER state={state_fips} offset={offset}",
             )
-            payload = resp.json()
         except Exception as exc:
-            logger.error("Failed to fetch TIGER geometries for state %s at offset %s: %s", state_fips, offset, exc)
+            logger.error("Failed to fetch TIGER geometries for state %s at offset %s after %d retries: %s",
+                         state_fips, offset, _MAX_RETRIES + 1, exc)
             break
 
         page = payload.get("features", []) if isinstance(payload, dict) else []
@@ -263,12 +295,11 @@ async def _fetch_acs_state(
 
     url = f"{CENSUS_API_BASE}/{vintage}/acs/acs5"
 
-    resp = await _retry_get(
+    data = await _retry_get_json(
         client, url,
         params=params, timeout=90.0,
         label=f"ACS state={state_fips}",
     )
-    data = resp.json()
 
     if not data or len(data) < 2:
         logger.warning("ACS state=%s returned empty/header-only response", state_fips)
