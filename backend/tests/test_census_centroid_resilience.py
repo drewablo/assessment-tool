@@ -74,8 +74,9 @@ async def test_ingest_state_runs_centroid_backfill(monkeypatch):
     monkeypatch.setattr(ingest_census, "async_session_factory", lambda: _Session())
     monkeypatch.setattr(ingest_census, "backfill_census_centroids", fake_backfill)
 
-    processed, upserted = await ingest_census._ingest_state("42", "2022")
+    tracts_inserted, geo_enriched = await ingest_census._ingest_state("42", "2022")
 
-    assert processed == 1
-    assert upserted == 1
+    assert tracts_inserted == 1
+    # TIGER geometry fetch is not mocked, so geo_enriched is 0
+    assert geo_enriched == 0
     assert calls["backfill"] == 1
