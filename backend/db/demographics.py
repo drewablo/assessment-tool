@@ -76,15 +76,14 @@ async def aggregate_demographics(
         )
 
     if not tracts:
+        state_abbr = STATE_FIPS_TO_ABBR.get(state_fips, f"FIPS {state_fips}")
         logger.warning(
             "Census catchment lookup returned zero tracts after all fallbacks "
             "(lat=%.6f lon=%.6f radius_miles=%.2f state_fips=%s county_fips=%s). "
-            "This state may not have been ingested.",
-            lat,
-            lon,
-            radius_miles,
-            state_fips,
-            county_fips,
+            "%s has not been ingested. "
+            "Fix: run census pipeline with states=['%s'].",
+            lat, lon, radius_miles, state_fips, county_fips,
+            state_abbr, state_fips,
         )
         return _empty_demographics(state_fips)
 
