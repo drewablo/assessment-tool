@@ -46,12 +46,18 @@ def test_housing_scoring_changes_between_senior_only_and_all_ages():
         "seniors_65_plus": 15000,
     }
     projects = [{"distance_miles": 1.4, "li_units": 120}]
+    section_202 = [{"distance_miles": 2.0, "li_units": 45}]
 
     all_ages = housing._score_housing(demographics, projects, target_population="all_ages")
-    senior_only = housing._score_housing(demographics, projects, target_population="senior_only")
+    senior_only = housing._score_housing(
+        demographics, projects, target_population="senior_only",
+        section_202_projects=section_202,
+    )
 
     assert all_ages["overall"] != senior_only["overall"]
     assert all_ages["family_density"] != senior_only["family_density"]
+    # Senior scoring uses Section 202 saturation ratio (assisted units / seniors_65_plus)
+    assert senior_only["saturation_ratio"] != all_ages["saturation_ratio"]
 
 
 async def _fake_benchmarks(**kwargs):
@@ -79,8 +85,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_housing_notes_reflect_selected_type(monkeypatch):
+    async def _empty_s202(*, lat, lon, radius_miles):
+        return []
+
     monkeypatch.setattr(housing, "USE_DB", True)
     monkeypatch.setattr(housing, "_get_nearby_housing_db", _fake_projects)
+    monkeypatch.setattr(housing, "_get_nearby_section_202_db", _empty_s202)
+    monkeypatch.setattr(housing, "get_nearby_section202_projects", lambda *a, **kw: [])
     monkeypatch.setattr(housing, "compute_module_benchmarks", _fake_benchmarks)
     monkeypatch.setattr(housing, "build_generic_hierarchical", lambda **kwargs: None)
 
@@ -150,3 +161,48 @@ def test_non_housing_modules_unaffected_by_field():
 
     assert schools.ministry_type == "schools"
     assert elder.ministry_type == "elder_care"
+
+
+def test_cache_key_includes_housing_target_population():
+    """Cache key must differ between senior_only and all_ages to prevent collisions."""
+    from main import _cache_key
+
+    senior = AnalysisRequest(
+        school_name="Test",
+        address="123 Main St",
+        ministry_type="housing",
+        housing_target_population="senior_only",
+    )
+    all_ages = AnalysisRequest(
+        school_name="Test",
+        address="123 Main St",
+        ministry_type="housing",
+        housing_target_population="all_ages",
+    )
+
+    key_senior = _cache_key(senior)
+    key_all = _cache_key(all_ages)
+    assert key_senior != key_all, "Cache keys must differ for senior_only vs all_ages"
+
+
+def test_senior_scoring_uses_section_202_saturation():
+    """When section_202_projects are provided, competition uses seniors_65_plus as denominator."""
+    demographics = {
+        "cost_burdened_renter_households": 900,
+        "median_household_income": 47000,
+        "renter_households": 2600,
+        "seniors_65_plus": 10000,
+    }
+    lihtc_projects = [{"distance_miles": 1.4, "li_units": 120}]
+    section_202 = [{"distance_miles": 2.0, "li_units": 45}]
+
+    scores = housing._score_housing(
+        demographics, lihtc_projects,
+        target_population="senior_only",
+        section_202_projects=section_202,
+    )
+
+    # Saturation ratio should be based on seniors_65_plus (45 * decay / 10000)
+    # Not on cost_burdened_renter_households
+    assert scores["saturation_ratio"] < 0.01  # 45 units / 10000 seniors is very small
+    assert scores["competition"] > 80  # Low saturation = high opportunity score
