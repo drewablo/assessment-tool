@@ -202,7 +202,12 @@ def test_senior_scoring_uses_section_202_saturation():
         section_202_projects=section_202,
     )
 
-    # Saturation ratio should be based on seniors_65_plus (45 * decay / 10000)
+    # Saturation ratio should be based on seniors_65_plus (total beds / 10000)
     # Not on cost_burdened_renter_households
-    assert scores["saturation_ratio"] < 0.01  # 45 units / 10000 seniors is very small
+    assert scores["saturation_ratio"] < 0.01  # 45 beds / 10000 seniors is very small
     assert scores["competition"] > 80  # Low saturation = high opportunity score
+    # New fields: property count, total beds, bed saturation, property density
+    assert scores["s202_property_count"] == 1
+    assert scores["s202_total_beds"] == 45
+    assert scores["s202_bed_saturation"] == scores["saturation_ratio"]
+    assert scores["s202_property_density"] == 1.0  # 1 property per 10k seniors

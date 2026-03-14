@@ -217,12 +217,25 @@ def _score_housing(
     income = piecewise_linear(ratio, [(25_000, 98), (40_000, 85), (60_000, 65), (80_000, 45), (100_000, 28), (130_000, 12)])
 
     if target_population == "senior_only" and section_202_projects is not None:
-        # Senior-specific competition: measure against Section 202 properties
-        # using seniors 65+ as the demand pool
+        # Senior-specific competition: measure both property density and bed
+        # density against seniors 65+ in the catchment.
         s202 = section_202_projects or []
+        s202_property_count = len(s202)
+        total_beds = sum((p.get("total_units") or p.get("li_units") or 30) for p in s202)
         weighted_units = sum((p.get("li_units") or 30) * decay_weight(p["distance_miles"]) for p in s202)
-        sat_ratio = weighted_units / seniors_65_plus if seniors_65_plus > 0 else (1.0 if weighted_units > 0 else 0.0)
-        competition = piecewise_linear(sat_ratio, [(0.0, 96), (0.005, 88), (0.02, 72), (0.05, 55), (0.1, 38), (0.2, 20)])
+
+        # Bed saturation: total beds / seniors 65+
+        bed_sat = total_beds / seniors_65_plus if seniors_65_plus > 0 else (1.0 if total_beds > 0 else 0.0)
+        # Property density: properties per 10,000 seniors
+        prop_density = (s202_property_count / seniors_65_plus * 10_000) if seniors_65_plus > 0 else (100.0 if s202_property_count > 0 else 0.0)
+
+        # Combined saturation ratio (beds per senior is the primary metric)
+        sat_ratio = bed_sat
+
+        # Score both dimensions and blend: 60% bed saturation, 40% property density
+        bed_score = piecewise_linear(bed_sat, [(0.0, 96), (0.005, 88), (0.02, 72), (0.05, 55), (0.1, 38), (0.2, 20)])
+        prop_score = piecewise_linear(prop_density, [(0.0, 96), (0.5, 88), (2.0, 72), (5.0, 55), (10.0, 38), (20.0, 20)])
+        competition = round(bed_score * 0.6 + prop_score * 0.4)
     else:
         # Standard LIHTC-based competition scoring
         weighted_units = sum((p.get("li_units") or 50) * decay_weight(p["distance_miles"]) for p in projects)
@@ -260,7 +273,7 @@ def _score_housing(
         + competition * weights["competition"]
         + family_density * weights["family_density"]
     )
-    return {
+    result = {
         "overall": overall,
         "market_size": market_size,
         "income": income,
@@ -274,6 +287,12 @@ def _score_housing(
         "weights": weights,
         "seniors_65_plus": seniors_65_plus,
     }
+    if target_population == "senior_only" and section_202_projects is not None:
+        result["s202_property_count"] = s202_property_count
+        result["s202_total_beds"] = total_beds
+        result["s202_bed_saturation"] = bed_sat
+        result["s202_property_density"] = prop_density
+    return result
 
 
 async def _get_nearby_housing_db(*, lat: float, lon: float, radius_miles: float) -> list[dict]:
@@ -640,8 +659,10 @@ async def analyze_housing(
                 label=("Section 202 Senior Saturation" if housing_target_population == "senior_only" else "LIHTC Saturation"),
                 description=(
                     (
-                        f"Section 202 assisted-unit saturation vs. {scores['seniors_65_plus']:,} seniors 65+: {scores['saturation_ratio']:.4f}"
-                        f" ({len(section_202_projects)} Section 202 properties in catchment)"
+                        f"{scores.get('s202_property_count', 0)} Section 202 properties with {scores.get('s202_total_beds', 0):,} total beds"
+                        f" vs. {scores['seniors_65_plus']:,} seniors 65+"
+                        f" — bed saturation: {scores.get('s202_bed_saturation', 0):.4f},"
+                        f" property density: {scores.get('s202_property_density', 0):.1f} per 10k seniors"
                     )
                     if housing_target_population == "senior_only"
                     else (
@@ -675,7 +696,8 @@ async def analyze_housing(
         recommendation_detail=(
             (
                 f"{scores['seniors_65_plus']:,} seniors age 65+ within the catchment"
-                + f". Section 202 saturation ratio {scores['saturation_ratio']:.4f} across {len(section_202_projects)} HUD 202 senior housing properties"
+                + f". {scores.get('s202_property_count', 0)} HUD 202 properties with {scores.get('s202_total_beds', 0):,} total beds"
+                + f" (bed saturation {scores.get('s202_bed_saturation', 0):.4f}, {scores.get('s202_property_density', 0):.1f} properties per 10k seniors)"
                 + f". {cost_burdened:,} cost-burdened renter households provide additional market context"
                 + ". " + calibration_note
             )
