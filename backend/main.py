@@ -107,8 +107,8 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
         "hud_lihtc_property": "hud_lihtc_property",
         "hud_section_202": "hud_section_202",
     }
-    required_pipelines = {"census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"}
-    optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"}
+    required_pipelines = {"census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_section_202"}
+    optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda"}
 
     # --- Check required table data presence (the real readiness gate) ---
     table_expectations = {
@@ -142,9 +142,9 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
         )
     section_202_rows = int(counts.get("hud_section_202") or 0)
     if section_202_rows == 0:
-        diagnostics.append(
-            "Optional enrichment table 'hud_section_202_properties' has 0 rows. "
-            "Senior Housing analysis will proceed without HUD Section 202 competitor data."
+        blocking_diagnostics.append(
+            "Table 'hud_section_202_properties' has 0 rows. "
+            "Run or re-run pipeline 'hud_section_202'."
         )
 
     # --- Check pipeline run history (freshness/provenance, not blocking) ---
@@ -307,8 +307,8 @@ async def _collect_db_data_health() -> dict:
 
     if counts.get("hud_section_202", 0) == 0:
         warnings.append(
-            "hud_section_202_properties is empty; Senior Housing analysis will not include "
-            "HUD Section 202 competitor data. Run: ingest-hud-section202"
+            "hud_section_202_properties is empty; Section 202 data is required. "
+            "Run: ingest-hud-section202"
         )
 
     return {

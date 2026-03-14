@@ -415,8 +415,9 @@ cmd_ingest() {
     schools) CLI_CMD=(python -m pipeline.cli ingest-schools) ;;
     elder-care) CLI_CMD=(python -m pipeline.cli ingest-elder-care) ;;
     housing) CLI_CMD=(python -m pipeline.cli ingest-housing) ;;
+    section-202) CLI_CMD=(python -m pipeline.cli ingest-hud-section202) ;;
     status) CLI_CMD=(python -m pipeline.cli status) ;;
-    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|schools|elder-care|housing|status" ;;
+    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|schools|elder-care|housing|section-202|status" ;;
   esac
 
   if [[ "$PIPELINE" == "all" || "$PIPELINE" == "census" ]] && [[ -n "$STATES" ]]; then
@@ -469,6 +470,7 @@ cmd_help() {
     ./start.sh doctor --prod             # API-level DB readiness checks
     ./start.sh doctor [--prod]           # bracket form also accepted
     ./start.sh ingest --prod             # ingest all datasets into DB
+    ./start.sh ingest --pipeline section-202 --prod  # ingest Section 202 only
 
 USAGE
 }

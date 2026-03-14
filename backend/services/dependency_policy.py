@@ -23,7 +23,7 @@ DEPENDENCY_REGISTRY: dict[str, DataDependencyRule] = {
     "hud_lihtc_property": DataDependencyRule("hud_lihtc_property", required=False, baseline_blocking=False, affects_confidence=True, export_blocking_in_strict=True, optional_note="HUD LIHTC enrichment unavailable; baseline still available."),
     "hud_lihtc_tenant": DataDependencyRule("hud_lihtc_tenant", required=False, baseline_blocking=False, affects_confidence=True, export_blocking_in_strict=False, optional_note="HUD tenant enrichment unavailable."),
     "hud_qct_dda": DataDependencyRule("hud_qct_dda", required=False, baseline_blocking=False, affects_confidence=True, export_blocking_in_strict=False, optional_note="QCT/DDA enrichment unavailable."),
-    "hud_section_202": DataDependencyRule("hud_section_202", required=False, baseline_blocking=False, affects_confidence=True, export_blocking_in_strict=False, optional_note="HUD Section 202 senior housing data unavailable; Senior Housing analysis will proceed without Section 202 competitor context."),
+    "hud_section_202": DataDependencyRule("hud_section_202", required=True, baseline_blocking=True, affects_confidence=True, export_blocking_in_strict=True, optional_note="HUD Section 202 senior housing data unavailable; run pipeline 'hud_section_202' to ingest."),
 }
 
 

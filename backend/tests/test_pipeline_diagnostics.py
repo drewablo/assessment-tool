@@ -115,6 +115,7 @@ def test_pipeline_diagnostics_tenant_and_qct_are_optional_for_readiness():
         "hud_lihtc_property": 12,
         "hud_lihtc_tenant": 0,
         "hud_qct_dda": 0,
+        "hud_section_202": 5,
     }
     pipelines = {
         name: {
@@ -122,7 +123,7 @@ def test_pipeline_diagnostics_tenant_and_qct_are_optional_for_readiness():
             "freshness_status": "fresh",
             "last_failure": {"error_message": None},
         }
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"]
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_section_202"]
     }
 
     diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
@@ -146,6 +147,7 @@ def test_pipeline_diagnostics_ready_no_tracking_when_data_present_but_no_runs():
         "hud_lihtc_property": 51846,
         "hud_lihtc_tenant": 4804,
         "hud_qct_dda": 0,
+        "hud_section_202": 100,
     }
     # All pipelines report no success
     pipelines = {
@@ -210,6 +212,7 @@ def test_pipeline_diagnostics_stale_pipeline_is_warning_not_blocking():
         "hud_lihtc_property": 12,
         "hud_lihtc_tenant": 0,
         "hud_qct_dda": 0,
+        "hud_section_202": 5,
     }
     pipelines = {
         "census_acs": {"last_success": "2025-01-01T00:00:00+00:00", "freshness_status": "stale", "last_failure": {"error_message": None}},
@@ -234,6 +237,7 @@ def test_pipeline_diagnostics_qct_empty_does_not_block_when_lihtc_property_has_d
         "hud_lihtc_property": 51846,
         "hud_lihtc_tenant": 4804,
         "hud_qct_dda": 0,
+        "hud_section_202": 5,
     }
     pipelines = {
         name: {
@@ -241,7 +245,7 @@ def test_pipeline_diagnostics_qct_empty_does_not_block_when_lihtc_property_has_d
             "freshness_status": "fresh",
             "last_failure": {"error_message": None},
         }
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"]
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_section_202"]
     }
 
     diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
@@ -253,10 +257,9 @@ def test_pipeline_diagnostics_qct_empty_does_not_block_when_lihtc_property_has_d
     assert readiness_status == "ready_with_fallbacks"
 
 
-def test_pipeline_diagnostics_ready_with_fallbacks_section202_empty_and_qct_failure():
-    """Matches production scenario: all required data present, hud_section_202
-    empty (never completed), hud_qct_dda has data and a resolved failure
-    (failure predates last success)."""
+def test_pipeline_diagnostics_not_ready_when_section202_empty():
+    """Matches production scenario: all other required data present, but
+    hud_section_202 is empty (never completed) — now blocks readiness."""
     counts = {
         "census_tracts": 84415,
         "schools": 20923,
@@ -286,17 +289,15 @@ def test_pipeline_diagnostics_ready_with_fallbacks_section202_empty_and_qct_fail
 
     diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
 
-    # DB is ready — all required tables populated
-    assert ready is True
-    assert readiness_status == "ready_with_fallbacks"
-    # Section 202 empty → optional enrichment warning
+    # Section 202 is now required — empty table blocks readiness
+    assert ready is False
+    assert readiness_status == "not_ready"
+    # Section 202 blocking diagnostic
     assert any("hud_section_202" in d and "0 rows" in d for d in diagnostics)
     # Section 202 never completed → informational diagnostic
     assert any("hud_section_202" in d and "never completed" in d for d in diagnostics)
     # QCT failure is RESOLVED (success at 03-10 > failure at 03-05) — should NOT appear
     assert not any("hud_qct_dda" in d and "recent failure" in d for d in diagnostics)
-    # NOT blocking
-    assert readiness_status != "not_ready"
 
 
 def test_pipeline_diagnostics_surfaces_failure_more_recent_than_success():

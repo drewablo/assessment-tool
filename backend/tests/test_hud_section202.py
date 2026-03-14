@@ -177,10 +177,10 @@ def test_transform_idempotent():
 def test_section_202_in_dependency_registry():
     assert "hud_section_202" in DEPENDENCY_REGISTRY
     rule = DEPENDENCY_REGISTRY["hud_section_202"]
-    assert rule.required is False
-    assert rule.baseline_blocking is False
+    assert rule.required is True
+    assert rule.baseline_blocking is True
     assert rule.affects_confidence is True
-    assert rule.export_blocking_in_strict is False
+    assert rule.export_blocking_in_strict is True
 
 
 def test_summarize_dependencies_includes_section_202():
@@ -512,7 +512,8 @@ def test_pipeline_diagnostics_section_202_missing():
     }
 
     diagnostics, db_ready, status = _build_pipeline_diagnostics(counts, pipelines)
-    # Section 202 is optional, so system should still be ready
-    assert db_ready is True
-    # But there should be a diagnostic about it
-    assert any("section_202" in d.lower() or "section 202" in d.lower() for d in diagnostics)
+    # Section 202 is now required — empty table blocks readiness
+    assert db_ready is False
+    assert status == "not_ready"
+    # Blocking diagnostic about it
+    assert any("hud_section_202" in d and "0 rows" in d for d in diagnostics)
