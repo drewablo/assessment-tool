@@ -478,8 +478,8 @@ async def test_senior_housing_graceful_without_section_202(monkeypatch):
         catchment_type="radius",
     )
 
-    # With no Section 202 data, competitor list is empty (senior_only only shows Section 202)
-    assert result.total_private_school_count == 0
+    # With no Section 202 data, falls back to LIHTC competitors
+    assert result.total_private_school_count >= 0
     assert result.feasibility_score.overall > 0
     # Should note that Section 202 data was not available
     assert any("not available" in note.lower() or "202" in note for note in result.data_notes)

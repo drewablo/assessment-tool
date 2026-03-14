@@ -45,6 +45,7 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
     : `Est. Catholic\n${ageRange}`;
 
   const targetPopulation = d.ministry_target_population ?? d.school_age_population;
+  const isSeniorHousing = ministryType === "housing" && d.seniors_65_plus != null && d.seniors_65_plus > 0 && d.ministry_target_population === d.seniors_65_plus;
   const hasSeniorOutlook = ministryType === "elder_care" && (d.seniors_projected_5yr != null || d.seniors_projected_10yr != null);
 
   const populationData = ministryType === "schools"
@@ -57,7 +58,7 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
     : [
         { name: "Total Pop.", value: d.total_population, color: "#6b7280" },
         {
-          name: ministryType === "elder_care" ? "Target Seniors" : "Cost-Burdened HH",
+          name: ministryType === "elder_care" ? "Target Seniors" : isSeniorHousing ? "Seniors 65+" : "Cost-Burdened HH",
           value: targetPopulation,
           color: "#172d57",
         },
@@ -76,7 +77,7 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
       {/* Key stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Stat label="Total Population" value={fmt(d.total_population)} />
-        <Stat label={ministryType === "schools" ? schoolAgeLabel(gender, gradeLevel) : ministryType === "elder_care" ? "Target Seniors" : "Cost-Burdened HH"} value={fmt(targetPopulation)} />
+        <Stat label={ministryType === "schools" ? schoolAgeLabel(gender, gradeLevel) : ministryType === "elder_care" ? "Target Seniors" : isSeniorHousing ? "Seniors 65+" : "Cost-Burdened HH"} value={fmt(targetPopulation)} />
         {ministryType === "schools" && (
           <Stat
             label={`Est. Catholic ${genderPrefix ? genderPrefix + " " : ""}${ageRange}`}
@@ -126,9 +127,9 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
         ) : (
           <>
             <Stat
-              label={ministryType === "elder_care" ? "Senior-Focused Demand Signal" : "Housing Need Signal"}
+              label={ministryType === "elder_care" ? "Senior-Focused Demand Signal" : isSeniorHousing ? "Senior Housing Demand" : "Housing Need Signal"}
               value={targetPopulation != null && d.total_households ? `${Math.round((targetPopulation / d.total_households) * 100)}%` : "N/A"}
-              note={ministryType === "elder_care" ? "Target seniors as share of households" : "Cost-burdened households as share of households"}
+              note={ministryType === "elder_care" ? "Target seniors as share of households" : isSeniorHousing ? "Seniors 65+ as share of households" : "Cost-burdened households as share of households"}
             />
             {ministryType === "housing" && (
               <>
@@ -192,6 +193,8 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
               ? "Catholic school-age estimate uses CARA state-level Catholic population data"
               : ministryType === "elder_care"
               ? "Target seniors reflects elder-care scoring population for this market"
+              : isSeniorHousing
+              ? "Seniors 65+ reflect senior housing scoring population"
               : "Cost-burdened renter households reflect housing-need scoring population"}
           </p>
         </div>

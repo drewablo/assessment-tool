@@ -424,10 +424,10 @@ async def analyze_housing(
         else:
             logger.warning("HUD Section 202: no properties found within %.1f miles (DB + CSV checked)", radius_miles)
 
-    # For senior_only, the competitor set is Section 202 properties only.
-    # LIHTC projects are kept for market context (hud_context) but not shown as competitors.
+    # For senior_only, prefer Section 202 as the competitor set.
+    # Fall back to LIHTC projects if no Section 202 data is available.
     if housing_target_population == "senior_only":
-        all_projects = section_202_projects
+        all_projects = section_202_projects if section_202_projects else projects
     else:
         all_projects = projects
 
@@ -539,7 +539,8 @@ async def analyze_housing(
             median_household_income=demographics.get("median_household_income"),
             total_households=demographics.get("total_households"),
             data_geography=demographics.get("data_geography", "county"),
-            ministry_target_population=cost_burdened,
+            ministry_target_population=(demographics.get("seniors_65_plus") or 0) if housing_target_population == "senior_only" else cost_burdened,
+            seniors_65_plus=demographics.get("seniors_65_plus"),
             cost_burdened_renter_households=cost_burdened,
             renter_households=renter_households,
             hud_eligible_households=hud_eligible,
