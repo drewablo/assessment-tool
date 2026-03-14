@@ -28,11 +28,11 @@ from pipeline.celery_app import celery_app
 
 logger = logging.getLogger("pipeline.hud_section202")
 
-HUD_SECTION_202_GEOJSON_URL = os.getenv(
+HUD_SECTION_202_URL = os.getenv(
     "HUD_SECTION_202_GEOJSON_URL",
     "https://services.arcgis.com/VTyQ9soqVukalItT/arcgis/rest/services/"
     "HUD_Section_202_Properties/FeatureServer/0/query"
-    "?outFields=*&where=1%3D1&f=geojson",
+    "?outFields=*&where=1%3D1&f=json",
 )
 
 HUD_SECTION_202_BATCH_SIZE = int(os.getenv("HUD_SECTION_202_BATCH_SIZE", "500"))
@@ -61,8 +61,27 @@ def _to_str(value, max_len: int | None = None) -> str | None:
     return s
 
 
-async def _fetch_geojson_page(url: str, offset: int = 0) -> dict:
-    """Fetch a page of GeoJSON features from the ArcGIS endpoint."""
+def _esri_feature_to_geojson(feature: dict) -> dict:
+    """Convert an Esri JSON feature to GeoJSON-style dict.
+
+    Esri JSON stores geometry as ``{"x": lon, "y": lat}`` while the rest
+    of the pipeline expects ``{"geometry": {"coordinates": [lon, lat]},
+    "properties": {...}}``.
+    """
+    geom = feature.get("geometry") or {}
+    props = feature.get("attributes") or {}
+    return {
+        "type": "Feature",
+        "geometry": {
+            "type": "Point",
+            "coordinates": [geom.get("x"), geom.get("y")],
+        },
+        "properties": props,
+    }
+
+
+async def _fetch_page(url: str, offset: int = 0) -> dict:
+    """Fetch a page of features from the ArcGIS endpoint (Esri JSON)."""
     separator = "&" if "?" in url else "?"
     paginated_url = f"{url}{separator}resultOffset={offset}&resultRecordCount={ARCGIS_PAGE_SIZE}"
     async with httpx.AsyncClient() as client:
@@ -72,22 +91,27 @@ async def _fetch_geojson_page(url: str, offset: int = 0) -> dict:
 
 
 async def _fetch_all_features() -> list[dict]:
-    """Fetch all features from the ArcGIS GeoJSON endpoint, handling pagination."""
+    """Fetch all features from the ArcGIS endpoint, handling pagination.
+
+    Uses ``f=json`` (Esri JSON) instead of ``f=geojson`` so that the
+    ``exceededTransferLimit`` flag is included in the response — this is
+    the only reliable way to know if more pages exist, since the server's
+    ``maxRecordCount`` (often 1000) may be lower than our requested page
+    size.
+    """
     all_features: list[dict] = []
     offset = 0
     while True:
-        payload = await _fetch_geojson_page(HUD_SECTION_202_GEOJSON_URL, offset)
-        features = payload.get("features", [])
-        if not features:
+        payload = await _fetch_page(HUD_SECTION_202_URL, offset)
+        raw_features = payload.get("features", [])
+        if not raw_features:
             break
+        features = [_esri_feature_to_geojson(f) for f in raw_features]
         all_features.extend(features)
         logger.info(
-            "HUD Section 202 fetch: offset=%d page_size=%d fetched=%d total_so_far=%d",
-            offset, len(features), len(features), len(all_features),
+            "HUD Section 202 fetch: offset=%d fetched=%d total_so_far=%d",
+            offset, len(features), len(all_features),
         )
-        # ArcGIS servers enforce their own maxRecordCount (often 1000)
-        # which may be lower than our requested page size.  The reliable
-        # signal is the exceededTransferLimit flag in the response.
         if not payload.get("exceededTransferLimit", False):
             break
         offset += len(features)

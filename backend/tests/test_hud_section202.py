@@ -520,8 +520,42 @@ def test_pipeline_diagnostics_section_202_missing():
 
 
 # ---------------------------------------------------------------------------
-# Pagination: exceededTransferLimit
+# Esri JSON → GeoJSON conversion
 # ---------------------------------------------------------------------------
+
+
+def test_esri_feature_to_geojson():
+    from pipeline.ingest_hud_section202 import _esri_feature_to_geojson
+
+    esri = {
+        "attributes": {"OBJECTID": 1, "SERVICING_SITE_NAME_TEXT": "Test"},
+        "geometry": {"x": -87.63, "y": 41.88},
+    }
+    result = _esri_feature_to_geojson(esri)
+    assert result["type"] == "Feature"
+    assert result["geometry"]["coordinates"] == [-87.63, 41.88]
+    assert result["properties"]["OBJECTID"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Pagination: exceededTransferLimit (Esri JSON)
+# ---------------------------------------------------------------------------
+
+
+def _make_esri_feature(objectid="1", lon=-87.63, lat=41.88):
+    """Build a minimal Esri JSON feature (attributes + geometry)."""
+    return {
+        "attributes": {
+            "OBJECTID": objectid,
+            "SERVICING_SITE_NAME_TEXT": f"Site {objectid}",
+            "PROPERTY_NAME_TEXT": "Alt",
+            "STD_ADDR": "100 Main",
+            "STD_CITY": "Chicago",
+            "STD_ST": "IL",
+            "STD_ZIP5": "60601",
+        },
+        "geometry": {"x": lon, "y": lat},
+    }
 
 
 @pytest.mark.asyncio
@@ -531,15 +565,15 @@ async def test_fetch_all_features_paginates_on_exceeded_transfer_limit(monkeypat
     from pipeline import ingest_hud_section202 as mod
 
     page1 = {
-        "features": [_make_feature(objectid=str(i)) for i in range(1000)],
+        "features": [_make_esri_feature(objectid=str(i)) for i in range(1000)],
         "exceededTransferLimit": True,
     }
     page2 = {
-        "features": [_make_feature(objectid=str(i)) for i in range(1000, 2000)],
+        "features": [_make_esri_feature(objectid=str(i)) for i in range(1000, 2000)],
         "exceededTransferLimit": True,
     }
     page3 = {
-        "features": [_make_feature(objectid=str(i)) for i in range(2000, 2500)],
+        "features": [_make_esri_feature(objectid=str(i)) for i in range(2000, 2500)],
         # No exceededTransferLimit → last page
     }
     pages = [page1, page2, page3]
@@ -551,13 +585,16 @@ async def test_fetch_all_features_paginates_on_exceeded_transfer_limit(monkeypat
         call_count += 1
         return pages[idx]
 
-    monkeypatch.setattr(mod, "_fetch_geojson_page", fake_fetch_page)
-    # Set page size higher than any single page to verify old logic would break
+    monkeypatch.setattr(mod, "_fetch_page", fake_fetch_page)
     monkeypatch.setattr(mod, "ARCGIS_PAGE_SIZE", 2000)
 
     features = await mod._fetch_all_features()
+    # All 2500 Esri features converted to GeoJSON
     assert len(features) == 2500
     assert call_count == 3
+    # Verify conversion happened
+    assert features[0]["type"] == "Feature"
+    assert "coordinates" in features[0]["geometry"]
 
 
 @pytest.mark.asyncio
@@ -566,14 +603,14 @@ async def test_fetch_all_features_stops_without_exceeded_flag(monkeypatch):
     from pipeline import ingest_hud_section202 as mod
 
     page1 = {
-        "features": [_make_feature(objectid=str(i)) for i in range(500)],
+        "features": [_make_esri_feature(objectid=str(i)) for i in range(500)],
         # No exceededTransferLimit → only page
     }
 
     async def fake_fetch_page(url, offset=0):
         return page1
 
-    monkeypatch.setattr(mod, "_fetch_geojson_page", fake_fetch_page)
+    monkeypatch.setattr(mod, "_fetch_page", fake_fetch_page)
     monkeypatch.setattr(mod, "ARCGIS_PAGE_SIZE", 2000)
 
     features = await mod._fetch_all_features()
