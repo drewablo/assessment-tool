@@ -290,12 +290,24 @@ async def normalize_lihtc_tenant(session: AsyncSession, snapshot: HudRawSnapshot
 async def normalize_qct_dda(session: AsyncSession, snapshot: HudRawSnapshot) -> int:
     rows = _load_rows(Path(snapshot.snapshot_path))
     aliases = CONTRACTS["qct_dda"].aliases
+
+    # Deduplicate by unique key — HUD source data may contain duplicate
+    # tract entries, and PostgreSQL's ON CONFLICT DO UPDATE cannot touch
+    # the same row twice in a single statement/flush.
+    seen_keys: set[tuple] = set()
+
     loaded = 0
     for row in rows:
         designation_year = _int_or_none(resolve_field(row, "DESIGNATION_YEAR", aliases))
         designation_type = (resolve_field(row, "DESIGNATION_TYPE", aliases) or "").upper()
         if designation_year is None or designation_type not in {"QCT", "DDA"}:
             continue
+
+        geoid11 = _normalize_geoid(resolve_field(row, "TRACT", aliases))
+        dedup_key = (designation_year, designation_type, geoid11)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
 
         geom = _parse_boundary_wkt(resolve_field(row, "WKT", aliases), designation_type)
 
@@ -304,7 +316,7 @@ async def normalize_qct_dda(session: AsyncSession, snapshot: HudRawSnapshot) -> 
             designation_type=designation_type,
             source_snapshot_id=snapshot.id,
             source_version=snapshot.source_version,
-            geoid11=_normalize_geoid(resolve_field(row, "TRACT", aliases)),
+            geoid11=geoid11,
             state_fips=(str(resolve_field(row, "STATE_FIPS", aliases) or "").zfill(2) or None),
             county_fips=_normalize_county_fips(resolve_field(row, "COUNTY_FIPS", aliases)),
             area_name=(resolve_field(row, "AREA_NAME", aliases) or None),
