@@ -245,11 +245,21 @@ export interface CompetitorSchool {
   affiliation: string;
   is_catholic: boolean;
   city: string | null;
+  state?: string | null;
+  street_address?: string | null;
+  zip_code?: string | null;
   enrollment: number | null;
   gender: string;
   grade_level: string;
   occupancy_pct?: number | null;
   mds_overall_rating?: number | null;
+  // HUD Section 202 detail fields
+  total_units?: number | null;
+  client_group_name?: string | null;
+  property_category?: string | null;
+  primary_financing_type?: string | null;
+  phone_number?: string | null;
+  reac_inspection_score?: number | null;
 }
 
 export interface DemographicTrend {

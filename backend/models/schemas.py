@@ -266,6 +266,9 @@ class CompetitorSchool(BaseModel):
     affiliation: str
     is_catholic: bool
     city: Optional[str] = None
+    state: Optional[str] = None
+    street_address: Optional[str] = None
+    zip_code: Optional[str] = None
     enrollment: Optional[int] = None
     gender: str = "Co-ed"          # "All Boys", "All Girls", "Co-ed", "Unknown"
     grade_level: str = "Unknown"   # "Elementary", "Middle School", "High School", "K-12", "Unknown"
@@ -273,6 +276,13 @@ class CompetitorSchool(BaseModel):
     tier_weight: float = 0.4          # 1.0, 0.7, 0.4, 0.15
     occupancy_pct: Optional[float] = None
     mds_overall_rating: Optional[int] = None  # CMS 5-star overall rating (1-5), elder care only
+    # HUD Section 202 detail fields
+    total_units: Optional[int] = None
+    client_group_name: Optional[str] = None
+    property_category: Optional[str] = None
+    primary_financing_type: Optional[str] = None
+    phone_number: Optional[str] = None
+    reac_inspection_score: Optional[int] = None
 
 
 class DemographicTrend(BaseModel):

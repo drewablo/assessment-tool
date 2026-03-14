@@ -107,7 +107,7 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
         <div>
           <h2 className="text-lg font-bold text-gray-900">{ministryType === "schools" ? "Competitor Schools" : ministryType === "housing" ? "Competing Housing Projects" : "Competing Elder Care Facilities"}</h2>
           <p className="text-xs text-gray-400">
-            {ministryType === "schools" ? "NCES Private School Survey 2021–22" : ministryType === "housing" ? "HUD LIHTC inventory" : "CMS Care Compare inventory"} · within {catchmentLabel ?? `${radiusMiles} miles`}
+            {ministryType === "schools" ? "NCES Private School Survey 2021–22" : ministryType === "housing" ? (schools.some(s => s.affiliation === "HUD Section 202") ? "HUD LIHTC + Section 202 inventory" : "HUD LIHTC inventory") : "CMS Care Compare inventory"} · within {catchmentLabel ?? `${radiusMiles} miles`}
           </p>
         </div>
         <div className="flex gap-2 text-sm">
@@ -172,12 +172,18 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${
-                            school.is_catholic ? "bg-blue-500" : "bg-gray-300"
+                            school.is_catholic ? "bg-blue-500" : school.affiliation === "HUD Section 202" ? "bg-amber-400" : "bg-gray-300"
                           }`}
                         />
                         <span className="font-medium text-gray-800 text-xs">{school.name}</span>
                       </div>
-                      {school.city && <div className="text-xs text-gray-400 ml-3.5">{school.city}</div>}
+                      {school.affiliation === "HUD Section 202" && school.street_address ? (
+                        <div className="text-xs text-gray-400 ml-3.5">
+                          {[school.street_address, school.city, school.state, school.zip_code].filter(Boolean).join(", ")}
+                        </div>
+                      ) : school.city ? (
+                        <div className="text-xs text-gray-400 ml-3.5">{school.city}</div>
+                      ) : null}
                     </td>
                     {(ministryType === "elder_care" || ministryType === "housing") && (
                       <td className="py-2.5 pr-4 text-xs text-gray-500">{school.affiliation}</td>
