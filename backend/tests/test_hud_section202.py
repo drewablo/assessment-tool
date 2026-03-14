@@ -517,3 +517,64 @@ def test_pipeline_diagnostics_section_202_missing():
     assert status == "not_ready"
     # Blocking diagnostic about it
     assert any("hud_section_202" in d and "0 rows" in d for d in diagnostics)
+
+
+# ---------------------------------------------------------------------------
+# Pagination: exceededTransferLimit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_features_paginates_on_exceeded_transfer_limit(monkeypatch):
+    """_fetch_all_features must continue fetching when exceededTransferLimit is True,
+    even if the page has fewer features than ARCGIS_PAGE_SIZE."""
+    from pipeline import ingest_hud_section202 as mod
+
+    page1 = {
+        "features": [_make_feature(objectid=str(i)) for i in range(1000)],
+        "exceededTransferLimit": True,
+    }
+    page2 = {
+        "features": [_make_feature(objectid=str(i)) for i in range(1000, 2000)],
+        "exceededTransferLimit": True,
+    }
+    page3 = {
+        "features": [_make_feature(objectid=str(i)) for i in range(2000, 2500)],
+        # No exceededTransferLimit → last page
+    }
+    pages = [page1, page2, page3]
+    call_count = 0
+
+    async def fake_fetch_page(url, offset=0):
+        nonlocal call_count
+        idx = call_count
+        call_count += 1
+        return pages[idx]
+
+    monkeypatch.setattr(mod, "_fetch_geojson_page", fake_fetch_page)
+    # Set page size higher than any single page to verify old logic would break
+    monkeypatch.setattr(mod, "ARCGIS_PAGE_SIZE", 2000)
+
+    features = await mod._fetch_all_features()
+    assert len(features) == 2500
+    assert call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_fetch_all_features_stops_without_exceeded_flag(monkeypatch):
+    """When exceededTransferLimit is absent, pagination should stop after that page."""
+    from pipeline import ingest_hud_section202 as mod
+
+    page1 = {
+        "features": [_make_feature(objectid=str(i)) for i in range(500)],
+        # No exceededTransferLimit → only page
+    }
+
+    async def fake_fetch_page(url, offset=0):
+        return page1
+
+    monkeypatch.setattr(mod, "_fetch_geojson_page", fake_fetch_page)
+    monkeypatch.setattr(mod, "ARCGIS_PAGE_SIZE", 2000)
+
+    features = await mod._fetch_all_features()
+    assert len(features) == 500
