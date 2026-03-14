@@ -329,6 +329,7 @@ async def test_senior_housing_includes_section_202(monkeypatch):
     monkeypatch.setattr(housing, "USE_DB", True)
     monkeypatch.setattr(housing, "_get_nearby_housing_db", _fake_projects)
     monkeypatch.setattr(housing, "_get_nearby_section_202_db", _fake_section_202)
+    monkeypatch.setattr(housing, "get_nearby_section202_projects", lambda *a, **kw: [])
     monkeypatch.setattr(housing, "compute_module_benchmarks", _fake_benchmarks)
     monkeypatch.setattr(housing, "build_generic_hierarchical", lambda **kwargs: None)
 
@@ -361,11 +362,12 @@ async def test_senior_housing_includes_section_202(monkeypatch):
         catchment_type="radius",
     )
 
-    # Should include both LIHTC and Section 202 properties
-    assert result.total_private_school_count == 2  # 1 LIHTC + 1 Section 202
+    # Senior-only shows only Section 202 properties as competitors (not LIHTC)
+    assert result.total_private_school_count == 1  # 1 Section 202 only
     affiliations = [c.affiliation for c in result.competitor_schools]
     assert "HUD Section 202" in affiliations
-    assert any("HUD LIHTC" in a for a in affiliations)
+    # LIHTC projects should NOT appear as competitors for senior_only
+    assert not any("HUD LIHTC" in a for a in affiliations)
 
     # Section 202 competitor should have correct display fields
     s202 = next(c for c in result.competitor_schools if c.affiliation == "HUD Section 202")
@@ -382,6 +384,9 @@ async def test_senior_housing_includes_section_202(monkeypatch):
     # Data notes should mention Section 202
     assert any("Section 202" in note for note in result.data_notes)
 
+    # Competition score label should reflect Section 202 scoring
+    assert "Section 202" in result.feasibility_score.competition.label
+
 
 @pytest.mark.asyncio
 async def test_all_ages_housing_excludes_section_202(monkeypatch):
@@ -390,6 +395,7 @@ async def test_all_ages_housing_excludes_section_202(monkeypatch):
     monkeypatch.setattr(housing, "USE_DB", True)
     monkeypatch.setattr(housing, "_get_nearby_housing_db", _fake_projects)
     monkeypatch.setattr(housing, "_get_nearby_section_202_db", _fake_section_202)
+    monkeypatch.setattr(housing, "get_nearby_section202_projects", lambda *a, **kw: [])
     monkeypatch.setattr(housing, "compute_module_benchmarks", _fake_benchmarks)
     monkeypatch.setattr(housing, "build_generic_hierarchical", lambda **kwargs: None)
 
@@ -427,6 +433,9 @@ async def test_all_ages_housing_excludes_section_202(monkeypatch):
     affiliations = [c.affiliation for c in result.competitor_schools]
     assert "HUD Section 202" not in affiliations
 
+    # Competition label should be standard LIHTC
+    assert "LIHTC" in result.feasibility_score.competition.label
+
 
 @pytest.mark.asyncio
 async def test_senior_housing_graceful_without_section_202(monkeypatch):
@@ -436,6 +445,7 @@ async def test_senior_housing_graceful_without_section_202(monkeypatch):
     monkeypatch.setattr(housing, "USE_DB", True)
     monkeypatch.setattr(housing, "_get_nearby_housing_db", _fake_projects)
     monkeypatch.setattr(housing, "_get_nearby_section_202_db", _empty_section_202)
+    monkeypatch.setattr(housing, "get_nearby_section202_projects", lambda *a, **kw: [])
     monkeypatch.setattr(housing, "compute_module_benchmarks", _fake_benchmarks)
     monkeypatch.setattr(housing, "build_generic_hierarchical", lambda **kwargs: None)
 
@@ -468,8 +478,8 @@ async def test_senior_housing_graceful_without_section_202(monkeypatch):
         catchment_type="radius",
     )
 
-    # Should still work with just LIHTC data
-    assert result.total_private_school_count == 1
+    # With no Section 202 data, competitor list is empty (senior_only only shows Section 202)
+    assert result.total_private_school_count == 0
     assert result.feasibility_score.overall > 0
     # Should note that Section 202 data was not available
     assert any("not available" in note.lower() or "202" in note for note in result.data_notes)

@@ -688,6 +688,8 @@ def _cache_key(request: AnalysisRequest) -> str:
         "weighting_profile": request.weighting_profile,
         "market_context": request.market_context,
         "mission_mode": request.mission_mode,
+        "housing_target_population": request.housing_target_population,
+        "care_level": request.care_level,
     }, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()[:16]
     return f"analysis:{request.ministry_type}:{digest}"

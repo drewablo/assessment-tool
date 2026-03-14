@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Literal, Optional
 
 from competitors.hud_lihtc import get_nearby_lihtc_projects
+from competitors.hud_section202 import get_nearby_section202_projects
 from models.schemas import (
     AnalysisResponse,
     CompetitorSchool,
@@ -204,16 +205,29 @@ def _score_housing(
     projects: List[dict],
     hud_context: Optional[dict] = None,
     target_population: Literal["senior_only", "all_ages"] = "all_ages",
+    section_202_projects: Optional[List[dict]] = None,
 ) -> Dict[str, float]:
     cost_burdened = demographics.get("cost_burdened_renter_households") or 0
+    seniors_65_plus = demographics.get("seniors_65_plus") or 0
+    renter_households = demographics.get("renter_households") or 0
+
     market_size = piecewise_linear(cost_burdened, [(0, 8), (250, 28), (750, 52), (1500, 72), (3000, 88), (6000, 97)])
 
     ratio = demographics.get("median_household_income") or 0
     income = piecewise_linear(ratio, [(25_000, 98), (40_000, 85), (60_000, 65), (80_000, 45), (100_000, 28), (130_000, 12)])
 
-    weighted_units = sum((p.get("li_units") or 50) * decay_weight(p["distance_miles"]) for p in projects)
-    sat_ratio = weighted_units / cost_burdened if cost_burdened > 0 else 1
-    competition = piecewise_linear(sat_ratio, [(0.0, 96), (0.2, 80), (0.4, 62), (0.8, 40), (1.0, 28), (1.4, 12)])
+    if target_population == "senior_only" and section_202_projects is not None:
+        # Senior-specific competition: measure against Section 202 properties
+        # using seniors 65+ as the demand pool
+        s202 = section_202_projects or []
+        weighted_units = sum((p.get("li_units") or 30) * decay_weight(p["distance_miles"]) for p in s202)
+        sat_ratio = weighted_units / seniors_65_plus if seniors_65_plus > 0 else (1.0 if weighted_units > 0 else 0.0)
+        competition = piecewise_linear(sat_ratio, [(0.0, 96), (0.005, 88), (0.02, 72), (0.05, 55), (0.1, 38), (0.2, 20)])
+    else:
+        # Standard LIHTC-based competition scoring
+        weighted_units = sum((p.get("li_units") or 50) * decay_weight(p["distance_miles"]) for p in projects)
+        sat_ratio = weighted_units / cost_burdened if cost_burdened > 0 else 1
+        competition = piecewise_linear(sat_ratio, [(0.0, 96), (0.2, 80), (0.4, 62), (0.8, 40), (1.0, 28), (1.4, 12)])
 
     hud_market_boost = 0.0
     hud_competition_boost = 0.0
@@ -231,15 +245,12 @@ def _score_housing(
     market_size = min(100, market_size + hud_market_boost)
     competition = min(100, competition + hud_competition_boost)
 
-    renter_households = demographics.get("renter_households") or 0
     family_density = piecewise_linear((cost_burdened / renter_households * 100) if renter_households > 0 else 0, [(0, 10), (10, 30), (20, 55), (30, 75), (45, 92)])
 
-    seniors_65_plus = demographics.get("seniors_65_plus") or 0
     senior_demand = piecewise_linear(seniors_65_plus, [(0, 8), (2_500, 32), (6_000, 58), (12_000, 80), (20_000, 95)])
 
     if target_population == "senior_only":
         market_size = min(100, market_size + piecewise_linear(seniors_65_plus, [(0, 0), (2_000, 2), (6_000, 5), (12_000, 8), (20_000, 12)]))
-        competition = min(100, competition + piecewise_linear(seniors_65_plus, [(0, 0), (2_000, 1), (6_000, 2), (12_000, 4), (20_000, 6)]))
         family_density = senior_demand
 
     weights = _housing_weights(target_population)
@@ -388,23 +399,37 @@ async def analyze_housing(
     # Include HUD Section 202 properties for Senior Housing analysis
     housing_target_population = getattr(request, "housing_target_population", "all_ages") or "all_ages"
     section_202_projects: list[dict] = []
-    if housing_target_population == "senior_only" and USE_DB:
-        try:
-            section_202_projects = await _get_nearby_section_202_db(
-                lat=location["lat"],
-                lon=location["lon"],
-                radius_miles=radius_miles,
-            )
-            if section_202_projects:
-                logger.info(
-                    "HUD Section 202: %d senior housing properties found within %.1f miles",
-                    len(section_202_projects), radius_miles,
+    if housing_target_population == "senior_only":
+        # Try DB first, then CSV fallback — no longer gated on USE_DB
+        if USE_DB:
+            try:
+                section_202_projects = await _get_nearby_section_202_db(
+                    lat=location["lat"],
+                    lon=location["lon"],
+                    radius_miles=radius_miles,
                 )
-        except Exception as exc:
-            logger.warning("HUD Section 202 query failed (non-blocking): %s", exc)
+            except Exception as exc:
+                logger.warning("HUD Section 202 DB query failed (non-blocking): %s", exc)
 
-    # Merge Section 202 into the projects list for unified competitor context
-    all_projects = projects + section_202_projects
+        if not section_202_projects:
+            section_202_projects = get_nearby_section202_projects(
+                location["lat"], location["lon"], radius_miles,
+            )
+
+        if section_202_projects:
+            logger.info(
+                "HUD Section 202: %d senior housing properties found within %.1f miles",
+                len(section_202_projects), radius_miles,
+            )
+        else:
+            logger.warning("HUD Section 202: no properties found within %.1f miles (DB + CSV checked)", radius_miles)
+
+    # For senior_only, the competitor set is Section 202 properties only.
+    # LIHTC projects are kept for market context (hud_context) but not shown as competitors.
+    if housing_target_population == "senior_only":
+        all_projects = section_202_projects
+    else:
+        all_projects = projects
 
     hud_context = {
         "tenant_households": sum((p.get("tenant_households") or 0) for p in projects),
@@ -415,9 +440,10 @@ async def analyze_housing(
     }
     scores = _score_housing(
         demographics,
-        all_projects,
+        projects,
         hud_context=hud_context,
         target_population=housing_target_population,
+        section_202_projects=section_202_projects if housing_target_population == "senior_only" else None,
     )
     cost_burdened = demographics.get("cost_burdened_renter_households") or 0
     renter_households = demographics.get("renter_households") or 0
@@ -590,10 +616,17 @@ async def analyze_housing(
             ),
             competition=MetricScore(
                 score=rounded_competition,
-                label="LIHTC Saturation",
+                label=("Section 202 Senior Saturation" if housing_target_population == "senior_only" else "LIHTC Saturation"),
                 description=(
-                    f"Weighted LIHTC unit saturation ratio: {scores['saturation_ratio']:.2f}"
-                    + (f"; QCT/DDA policy-context adjustment +{scores['hud_competition_boost']:.1f}" if scores.get("hud_competition_boost") else "")
+                    (
+                        f"Section 202 assisted-unit saturation vs. {scores['seniors_65_plus']:,} seniors 65+: {scores['saturation_ratio']:.4f}"
+                        f" ({len(section_202_projects)} Section 202 properties in catchment)"
+                    )
+                    if housing_target_population == "senior_only"
+                    else (
+                        f"Weighted LIHTC unit saturation ratio: {scores['saturation_ratio']:.2f}"
+                        + (f"; QCT/DDA policy-context adjustment +{scores['hud_competition_boost']:.1f}" if scores.get("hud_competition_boost") else "")
+                    )
                 ),
                 weight=round(scores["weights"]["competition"] * 100),
                 rating=score_rating(rounded_competition),
@@ -619,12 +652,21 @@ async def analyze_housing(
         recommendation=rec,
         population_gravity=gravity_map,
         recommendation_detail=(
-            f"{cost_burdened:,} cost-burdened renter households within the catchment"
-            + (f" ({renter_burden_pct}% of all renters)" if renter_burden_pct is not None else "")
-            + (f"; an estimated {hud_eligible:,} households below 60% AMI" if hud_eligible else "")
-            + f". LIHTC saturation ratio {scores['saturation_ratio']:.2f} across {len(all_projects)} existing projects"
-            + (f", including {hud_context['qct_projects']} QCT and {hud_context['dda_projects']} DDA-designated projects" if hud_context["used_db_enrichment"] else "")
-            + ". " + calibration_note
+            (
+                f"{scores['seniors_65_plus']:,} seniors age 65+ within the catchment"
+                + f". Section 202 saturation ratio {scores['saturation_ratio']:.4f} across {len(section_202_projects)} HUD 202 senior housing properties"
+                + f". {cost_burdened:,} cost-burdened renter households provide additional market context"
+                + ". " + calibration_note
+            )
+            if housing_target_population == "senior_only"
+            else (
+                f"{cost_burdened:,} cost-burdened renter households within the catchment"
+                + (f" ({renter_burden_pct}% of all renters)" if renter_burden_pct is not None else "")
+                + (f"; an estimated {hud_eligible:,} households below 60% AMI" if hud_eligible else "")
+                + f". LIHTC saturation ratio {scores['saturation_ratio']:.2f} across {len(all_projects)} existing projects"
+                + (f", including {hud_context['qct_projects']} QCT and {hud_context['dda_projects']} DDA-designated projects" if hud_context["used_db_enrichment"] else "")
+                + ". " + calibration_note
+            )
         ),
         data_notes=[
             note for note in [
