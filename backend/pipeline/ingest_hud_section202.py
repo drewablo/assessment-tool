@@ -12,6 +12,7 @@ Follows the same ingestion pattern as ingest_elder_care.py and ingest_housing.py
 
 import asyncio
 import logging
+import math
 import os
 from collections import Counter
 
@@ -32,7 +33,7 @@ HUD_SECTION_202_URL = os.getenv(
     "HUD_SECTION_202_GEOJSON_URL",
     "https://services.arcgis.com/VTyQ9soqVukalItT/arcgis/rest/services/"
     "HUD_Section_202_Properties/FeatureServer/0/query"
-    "?outFields=*&where=1%3D1&f=json",
+    "?outFields=*&where=1%3D1&f=json&outSR=4326",
 )
 
 HUD_SECTION_202_BATCH_SIZE = int(os.getenv("HUD_SECTION_202_BATCH_SIZE", "500"))
@@ -61,20 +62,43 @@ def _to_str(value, max_len: int | None = None) -> str | None:
     return s
 
 
+def _web_mercator_to_wgs84(x: float, y: float) -> tuple[float, float]:
+    """Convert Web Mercator (EPSG:3857) coordinates to WGS84 (EPSG:4326)."""
+    lon = x * 180.0 / 20037508.34
+    lat = math.degrees(2 * math.atan(math.exp(y * math.pi / 20037508.34)) - math.pi / 2)
+    return lon, lat
+
+
+def _is_web_mercator(x: float, y: float) -> bool:
+    """Detect if coordinates are likely Web Mercator rather than WGS84."""
+    return abs(x) > 180 or abs(y) > 90
+
+
 def _esri_feature_to_geojson(feature: dict) -> dict:
     """Convert an Esri JSON feature to GeoJSON-style dict.
 
     Esri JSON stores geometry as ``{"x": lon, "y": lat}`` while the rest
     of the pipeline expects ``{"geometry": {"coordinates": [lon, lat]},
     "properties": {...}}``.
+
+    If coordinates appear to be in Web Mercator (EPSG:3857), they are
+    automatically reprojected to WGS84 (EPSG:4326).
     """
     geom = feature.get("geometry") or {}
     props = feature.get("attributes") or {}
+    x, y = geom.get("x"), geom.get("y")
+    if x is not None and y is not None:
+        try:
+            x, y = float(x), float(y)
+            if _is_web_mercator(x, y):
+                x, y = _web_mercator_to_wgs84(x, y)
+        except (ValueError, TypeError):
+            pass
     return {
         "type": "Feature",
         "geometry": {
             "type": "Point",
-            "coordinates": [geom.get("x"), geom.get("y")],
+            "coordinates": [x, y],
         },
         "properties": props,
     }
@@ -143,6 +167,8 @@ def _rejection_reason(feature: dict) -> str | None:
         lon, lat = float(coords[0]), float(coords[1])
         if lon == 0 and lat == 0:
             return "zero_coordinates"
+        if abs(lon) > 180 or abs(lat) > 90:
+            return "coordinates_out_of_wgs84_range"
     except (ValueError, TypeError, IndexError):
         return "invalid_coordinates"
 
@@ -173,6 +199,8 @@ def _transform_feature(feature: dict) -> dict | None:
     except (ValueError, TypeError, IndexError):
         return None
     if lon == 0 and lat == 0:
+        return None
+    if abs(lon) > 180 or abs(lat) > 90:
         return None
 
     return {
