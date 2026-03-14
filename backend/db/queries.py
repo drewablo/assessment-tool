@@ -24,6 +24,7 @@ from db.models import (
     HudLihtcTenant,
     HudQctDdaDesignation,
     HudPropertyDesignationMatch,
+    HudSection202Property,
 )
 
 
@@ -572,3 +573,35 @@ async def get_top_opportunities(
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def get_nearby_section_202(
+    session: AsyncSession,
+    lat: float,
+    lon: float,
+    radius_miles: float,
+    limit: int = 50,
+) -> list[tuple[HudSection202Property, float]]:
+    """Get HUD Section 202 properties within radius, ordered by distance."""
+    point = _make_point(lat, lon)
+    distance_meters = radius_miles * METERS_PER_MILE
+
+    distance_expr = func.ST_Distance(
+        _geo(HudSection202Property.location),
+        _geo(point),
+    ) / METERS_PER_MILE
+
+    stmt = (
+        select(HudSection202Property, distance_expr.label("distance_miles"))
+        .where(
+            func.ST_DWithin(
+                _geo(HudSection202Property.location),
+                _geo(point),
+                distance_meters,
+            )
+        )
+        .order_by(distance_expr)
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]

@@ -9,6 +9,7 @@ Usage:
     python -m pipeline.cli ingest-hud-property
     python -m pipeline.cli ingest-hud-tenant
     python -m pipeline.cli ingest-hud-qct
+    python -m pipeline.cli ingest-hud-section202 # Ingest HUD Section 202 data
     python -m pipeline.cli ingest-all        # Run all ingestion pipelines
     python -m pipeline.cli ingest-hud-foundation --source-family ... --file ... --dataset-year ...
     python -m pipeline.cli status            # Show pipeline run status
@@ -83,11 +84,19 @@ async def cmd_ingest_hud_qct():
     print(f"Done: {result}")
 
 
+async def cmd_ingest_hud_section202():
+    from pipeline.ingest_hud_section202 import _ingest_hud_section202_async
+    print("Ingesting HUD Section 202 senior housing data...")
+    result = await _ingest_hud_section202_async()
+    print(f"Done: {result}")
+
+
 async def cmd_ingest_all(args):
     await cmd_ingest_census(args)
     await cmd_ingest_schools()
     await cmd_ingest_elder_care()
     await cmd_ingest_housing()
+    await cmd_ingest_hud_section202()
     print("All pipelines complete.")
 
 
@@ -151,7 +160,7 @@ async def cmd_status():
     from db.connection import async_session_factory
     from pipeline.base import get_latest_run
     from sqlalchemy import select, func
-    from db.models import PipelineRun, CensusTract, CompetitorSchoolRecord, CompetitorElderCare, CompetitorHousing
+    from db.models import PipelineRun, CensusTract, CompetitorSchoolRecord, CompetitorElderCare, CompetitorHousing, HudSection202Property
 
     async with async_session_factory() as session:
         # Table counts
@@ -160,6 +169,7 @@ async def cmd_status():
             (CompetitorSchoolRecord, "Schools"),
             (CompetitorElderCare, "Elder Care Facilities"),
             (CompetitorHousing, "Housing Projects"),
+            (HudSection202Property, "HUD Section 202 Properties"),
         ]:
             result = await session.execute(select(func.count()).select_from(model))
             count = result.scalar()
@@ -168,7 +178,7 @@ async def cmd_status():
         print()
 
         # Latest pipeline runs
-        pipelines = ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]
+        pipelines = ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]
         for name in pipelines:
             run = await get_latest_run(session, name)
             if run:
@@ -195,6 +205,7 @@ def main():
     sub.add_parser("ingest-hud-property", help="Ingest HUD LIHTC property ZIP")
     sub.add_parser("ingest-hud-tenant", help="Ingest HUD LIHTC tenant workbook")
     sub.add_parser("ingest-hud-qct", help="Ingest HUD QCT/DDA workbook")
+    sub.add_parser("ingest-hud-section202", help="Ingest HUD Section 202 senior housing data")
 
     all_parser = sub.add_parser("ingest-all", help="Run all ingestion pipelines")
     all_parser.add_argument("--vintage", default="2022")
@@ -234,6 +245,8 @@ def main():
         asyncio.run(cmd_ingest_hud_tenant())
     elif args.command == "ingest-hud-qct":
         asyncio.run(cmd_ingest_hud_qct())
+    elif args.command == "ingest-hud-section202":
+        asyncio.run(cmd_ingest_hud_section202())
     elif args.command == "status":
         asyncio.run(cmd_status())
     elif args.command == "ingest-hud-foundation":

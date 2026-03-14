@@ -77,6 +77,7 @@ PIPELINE_FRESHNESS_TARGET_HOURS = {
     "hud_lihtc_property": 24 * 30,
     "hud_lihtc_tenant": 24 * 30,
     "hud_qct_dda": 24 * 30,
+    "hud_section_202": 24 * 30,
 }
 
 
@@ -104,9 +105,10 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
         "nces_pss": "schools",
         "cms_elder_care": "elder_care_facilities",
         "hud_lihtc_property": "hud_lihtc_property",
+        "hud_section_202": "hud_section_202",
     }
     required_pipelines = {"census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property"}
-    optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda"}
+    optional_pipelines = {"hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"}
 
     # --- Check required table data presence (the real readiness gate) ---
     table_expectations = {
@@ -137,6 +139,12 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
         diagnostics.append(
             "Optional enrichment table 'hud_qct_dda' has 0 rows. "
             "Housing baseline remains available; QCT/DDA policy context will be skipped."
+        )
+    section_202_rows = int(counts.get("hud_section_202") or 0)
+    if section_202_rows == 0:
+        diagnostics.append(
+            "Optional enrichment table 'hud_section_202_properties' has 0 rows. "
+            "Senior Housing analysis will proceed without HUD Section 202 competitor data."
         )
 
     # --- Check pipeline run history (freshness/provenance, not blocking) ---
@@ -206,6 +214,7 @@ async def _collect_db_data_health() -> dict:
         HudLihtcProperty,
         HudLihtcTenant,
         HudQctDdaDesignation,
+        HudSection202Property,
     )
 
     parsed = make_url(DATABASE_URL)
@@ -237,6 +246,7 @@ async def _collect_db_data_health() -> dict:
             (HudLihtcProperty, "hud_lihtc_property"),
             (HudLihtcTenant, "hud_lihtc_tenant"),
             (HudQctDdaDesignation, "hud_qct_dda"),
+            (HudSection202Property, "hud_section_202"),
         ]:
             counts[key] = int((await session.execute(select(func.count()).select_from(model))).scalar() or 0)
 
@@ -285,6 +295,12 @@ async def _collect_db_data_health() -> dict:
     for table in ("competitors_schools", "competitors_elder_care"):
         if counts[table] == 0:
             warnings.append(f"{table} is empty; module will fall back to live provider.")
+
+    if counts.get("hud_section_202", 0) == 0:
+        warnings.append(
+            "hud_section_202_properties is empty; Senior Housing analysis will not include "
+            "HUD Section 202 competitor data. Run: ingest-hud-section202"
+        )
 
     return {
         "use_db": True,
@@ -1172,6 +1188,7 @@ async def pipeline_status():
         HudLihtcTenant,
         HudQctDdaDesignation,
         HudRawSnapshot,
+        HudSection202Property,
         PipelineRun,
     )
 
@@ -1187,13 +1204,14 @@ async def pipeline_status():
             (HudLihtcTenant, "hud_lihtc_tenant"),
             (HudQctDdaDesignation, "hud_qct_dda"),
             (HudQctDdaDesignation, "hud_qct_dda_designations"),
+            (HudSection202Property, "hud_section_202"),
         ]:
             result = await session.execute(select(func.count()).select_from(model))
             counts[label] = result.scalar()
 
         pipelines = {}
         stale_pipelines = []
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]:
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]:
             run = await get_latest_run(session, name)
             failed = await session.execute(
                 select(PipelineRun)

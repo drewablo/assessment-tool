@@ -108,7 +108,12 @@ export default function SchoolMap({
 
       // Competitor pins
       for (const school of schools) {
-        const color = ministryType === "schools" && school.is_catholic ? "#3b82f6" : "#9ca3af";
+        const isSection202 = school.affiliation === "HUD Section 202";
+        const color = ministryType === "schools" && school.is_catholic
+          ? "#3b82f6"
+          : isSection202
+          ? "#f59e0b"  // amber for Section 202
+          : "#9ca3af";
         const icon = L.divIcon({
           className: "",
           html: `<div style="
@@ -122,15 +127,32 @@ export default function SchoolMap({
           iconAnchor: [6, 6],
         });
 
+        // Build popup with full address for Section 202
+        let popupContent = `<strong>${school.name}</strong><br>${school.affiliation}<br>${school.distance_miles} mi away`;
+        if (isSection202) {
+          const addrParts = [school.street_address, school.city, school.state, school.zip_code].filter(Boolean);
+          if (addrParts.length > 0) {
+            popupContent += `<br><span style="color:#666">${addrParts.join(", ")}</span>`;
+          }
+          if (school.enrollment) {
+            popupContent += `<br>${school.enrollment.toLocaleString()} assisted units`;
+          }
+          if (school.total_units) {
+            popupContent += ` / ${school.total_units.toLocaleString()} total`;
+          }
+          if (school.client_group_name) {
+            popupContent += `<br>Client: ${school.client_group_name}`;
+          }
+          if (school.reac_inspection_score != null) {
+            popupContent += `<br>REAC Score: ${school.reac_inspection_score}`;
+          }
+        } else if (school.enrollment) {
+          popupContent += `<br>${school.enrollment.toLocaleString()} ${ministryType === "schools" ? "students" : ministryType === "housing" ? "units" : "beds"}`;
+        }
+
         L.marker([school.lat, school.lon], { icon })
           .addTo(map)
-          .bindPopup(
-            `<strong>${school.name}</strong><br>
-            ${school.affiliation}<br>
-            ${school.distance_miles} mi away
-            ${school.enrollment ? `<br>${school.enrollment.toLocaleString()} ${ministryType === "schools" ? "students" : ministryType === "housing" ? "units" : "beds"}` : ""}`,
-            { maxWidth: 220 }
-          );
+          .bindPopup(popupContent, { maxWidth: 260 });
       }
     }
 
@@ -181,6 +203,12 @@ export default function SchoolMap({
           <span className="w-3 h-3 rounded-full bg-gray-400 border-2 border-white inline-block" />
           {ministryType === "schools" ? "Other private" : ministryType === "housing" ? "Housing project" : "Elder care facility"}
         </span>
+        {ministryType === "housing" && schools.some(s => s.affiliation === "HUD Section 202") && (
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-full bg-amber-400 border-2 border-white inline-block" />
+            HUD Section 202
+          </span>
+        )}
       </div>
     </div>
   );

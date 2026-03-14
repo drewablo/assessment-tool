@@ -315,6 +315,50 @@ async def _get_nearby_housing_db(*, lat: float, lon: float, radius_miles: float)
         return mapped
 
 
+async def _get_nearby_section_202_db(*, lat: float, lon: float, radius_miles: float) -> list[dict]:
+    """Fetch nearby HUD Section 202 senior housing properties from the database."""
+    from db.connection import get_session
+    from db.queries import get_nearby_section_202
+
+    async with get_session() as session:
+        rows = await get_nearby_section_202(
+            session,
+            lat=lat,
+            lon=lon,
+            radius_miles=radius_miles,
+            limit=50,
+        )
+    mapped: list[dict] = []
+    for prop, distance in rows:
+        mapped.append(
+            {
+                "name": prop.servicing_site_name,
+                "lat": prop.lat,
+                "lon": prop.lon,
+                "distance_miles": round(float(distance), 2),
+                "city": prop.city,
+                "state": prop.state,
+                "street_address": prop.street_address,
+                "zip_code": prop.zip_code,
+                "li_units": prop.total_assisted_units,
+                "total_units": prop.total_units,
+                "affiliation": "HUD Section 202",
+                "is_catholic": False,
+                "is_qct": False,
+                "is_dda": False,
+                "tenant_households": None,
+                "property_name": prop.property_name,
+                "client_group_name": prop.client_group_name,
+                "property_category": prop.property_category,
+                "primary_financing_type": prop.primary_financing_type,
+                "phone_number": prop.phone_number,
+                "reac_inspection_score": prop.reac_inspection_score,
+                "source_type": "hud_section_202",
+            }
+        )
+    return mapped
+
+
 async def analyze_housing(
     *,
     location: dict,
@@ -341,16 +385,37 @@ async def analyze_housing(
     if (not USE_DB) or used_loader_fallback:
         projects = get_nearby_lihtc_projects(location["lat"], location["lon"], radius_miles)
 
+    # Include HUD Section 202 properties for Senior Housing analysis
+    housing_target_population = getattr(request, "housing_target_population", "all_ages") or "all_ages"
+    section_202_projects: list[dict] = []
+    if housing_target_population == "senior_only" and USE_DB:
+        try:
+            section_202_projects = await _get_nearby_section_202_db(
+                lat=location["lat"],
+                lon=location["lon"],
+                radius_miles=radius_miles,
+            )
+            if section_202_projects:
+                logger.info(
+                    "HUD Section 202: %d senior housing properties found within %.1f miles",
+                    len(section_202_projects), radius_miles,
+                )
+        except Exception as exc:
+            logger.warning("HUD Section 202 query failed (non-blocking): %s", exc)
+
+    # Merge Section 202 into the projects list for unified competitor context
+    all_projects = projects + section_202_projects
+
     hud_context = {
         "tenant_households": sum((p.get("tenant_households") or 0) for p in projects),
         "qct_projects": sum(1 for p in projects if p.get("is_qct")),
         "dda_projects": sum(1 for p in projects if p.get("is_dda")),
         "used_db_enrichment": USE_DB and not used_loader_fallback,
+        "section_202_count": len(section_202_projects),
     }
-    housing_target_population = getattr(request, "housing_target_population", "all_ages") or "all_ages"
     scores = _score_housing(
         demographics,
-        projects,
+        all_projects,
         hud_context=hud_context,
         target_population=housing_target_population,
     )
@@ -463,20 +528,37 @@ async def analyze_housing(
                 lon=p["lon"],
                 distance_miles=p["distance_miles"],
                 affiliation=(
-                    "HUD LIHTC"
-                    + (" | QCT" if p.get("is_qct") else "")
-                    + (" | DDA" if p.get("is_dda") else "")
+                    p.get("affiliation", "HUD LIHTC")
+                    if p.get("source_type") == "hud_section_202"
+                    else (
+                        "HUD LIHTC"
+                        + (" | QCT" if p.get("is_qct") else "")
+                        + (" | DDA" if p.get("is_dda") else "")
+                    )
                 ),
                 is_catholic=False,
                 city=p.get("city"),
+                state=p.get("state"),
+                street_address=p.get("street_address"),
+                zip_code=p.get("zip_code"),
                 enrollment=p.get("li_units"),
                 gender="N/A",
-                grade_level="Housing",
+                grade_level=(
+                    "Section 202 Senior"
+                    if p.get("source_type") == "hud_section_202"
+                    else "Housing"
+                ),
+                total_units=p.get("total_units") if p.get("source_type") == "hud_section_202" else None,
+                client_group_name=p.get("client_group_name") if p.get("source_type") == "hud_section_202" else None,
+                property_category=p.get("property_category") if p.get("source_type") == "hud_section_202" else None,
+                primary_financing_type=p.get("primary_financing_type") if p.get("source_type") == "hud_section_202" else None,
+                phone_number=p.get("phone_number") if p.get("source_type") == "hud_section_202" else None,
+                reac_inspection_score=p.get("reac_inspection_score") if p.get("source_type") == "hud_section_202" else None,
             )
-            for p in projects[:25]
+            for p in all_projects[:25]
         ],
         catholic_school_count=0,
-        total_private_school_count=len(projects),
+        total_private_school_count=len(all_projects),
         feasibility_score=FeasibilityScore(
             overall=scores["overall"],
             weighting_profile=request.weighting_profile,
@@ -540,20 +622,29 @@ async def analyze_housing(
             f"{cost_burdened:,} cost-burdened renter households within the catchment"
             + (f" ({renter_burden_pct}% of all renters)" if renter_burden_pct is not None else "")
             + (f"; an estimated {hud_eligible:,} households below 60% AMI" if hud_eligible else "")
-            + f". LIHTC saturation ratio {scores['saturation_ratio']:.2f} across {len(projects)} existing projects"
+            + f". LIHTC saturation ratio {scores['saturation_ratio']:.2f} across {len(all_projects)} existing projects"
             + (f", including {hud_context['qct_projects']} QCT and {hud_context['dda_projects']} DDA-designated projects" if hud_context["used_db_enrichment"] else "")
             + ". " + calibration_note
         ),
         data_notes=[
-            "Housing module Phase 2 scaffold active.",
-            calibration_note,
-            "Competitor inventory sourced from local HUD LIHTC ingest cache when available.",
-            (
-                "HUD normalized enrichment active: LIHTC properties joined to QCT/DDA designations and tenant aggregates "
-                "using deterministic exact keys."
-                if hud_context["used_db_enrichment"]
-                else "HUD normalized enrichment unavailable for this catchment; fallback path used."
-            ),
+            note for note in [
+                "Housing module Phase 2 scaffold active.",
+                calibration_note,
+                "Competitor inventory sourced from local HUD LIHTC ingest cache when available.",
+                (
+                    f"HUD Section 202: {hud_context['section_202_count']} senior housing properties included in competitor context."
+                    if hud_context.get("section_202_count")
+                    else "HUD Section 202 data not available for this analysis."
+                    if housing_target_population == "senior_only"
+                    else None
+                ),
+                (
+                    "HUD normalized enrichment active: LIHTC properties joined to QCT/DDA designations and tenant aggregates "
+                    "using deterministic exact keys."
+                    if hud_context["used_db_enrichment"]
+                    else "HUD normalized enrichment unavailable for this catchment; fallback path used."
+                ),
+            ] if note is not None
         ] + (
             [
                 f"HUD-eligible estimate: {hud_eligible:,} households have income below 60% of area median "

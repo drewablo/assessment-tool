@@ -564,3 +564,45 @@ class HudPropertyDesignationMatch(Base):
     __table_args__ = (
         UniqueConstraint("property_row_id", "designation_row_id", name="uq_hud_property_designation_pair"),
     )
+
+
+# ---------------------------------------------------------------------------
+# HUD Section 202 Senior Housing Properties
+# ---------------------------------------------------------------------------
+
+class HudSection202Property(Base):
+    """Normalized HUD Section 202 senior housing property records.
+
+    Source: HUD Section 202 ArcGIS FeatureServer (GeoJSON endpoint).
+    Primary display name: SERVICING_SITE_NAME_TEXT.
+    """
+
+    __tablename__ = "hud_section_202_properties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    property_id: Mapped[str] = mapped_column(String(30), index=True)  # source unique identifier
+    servicing_site_name: Mapped[str] = mapped_column(String(300))  # SERVICING_SITE_NAME_TEXT — primary display name
+    property_name: Mapped[str | None] = mapped_column(String(300))  # PROPERTY_NAME_TEXT — alternate name
+    street_address: Mapped[str | None] = mapped_column(String(300))  # STD_ADDR
+    city: Mapped[str | None] = mapped_column(String(100))  # STD_CITY
+    state: Mapped[str | None] = mapped_column(String(2), index=True)  # STD_ST
+    zip_code: Mapped[str | None] = mapped_column(String(10))  # STD_ZIP5
+    lat: Mapped[float] = mapped_column(Float)
+    lon: Mapped[float] = mapped_column(Float)
+    location: Mapped[None] = mapped_column(Geometry("POINT", srid=4326))
+    total_units: Mapped[int | None] = mapped_column(Integer)  # TOTAL_UNIT_COUNT
+    total_assisted_units: Mapped[int | None] = mapped_column(Integer)  # TOTAL_ASSISTED_UNIT_COUNT
+    client_group_name: Mapped[str | None] = mapped_column(String(120))  # CLIENT_GROUP_NAME
+    client_group_type: Mapped[str | None] = mapped_column(String(80))  # CLIENT_GROUP_TYPE
+    property_category: Mapped[str | None] = mapped_column(String(120))  # PROPERTY_CATEGORY_NAME
+    primary_financing_type: Mapped[str | None] = mapped_column(String(120))  # PRIMARY_FINANCING_TYPE
+    phone_number: Mapped[str | None] = mapped_column(String(30))  # PROPERTY_ON_SITE_PHONE_NUMBER
+    reac_inspection_score: Mapped[int | None] = mapped_column(Integer)  # REAC_LAST_INSPECTION_SCORE
+    raw_payload: Mapped[dict | None] = mapped_column(JSONB)  # full source feature properties for traceability
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("property_id", name="uq_hud_section_202_property_id"),
+        Index("ix_hud_section_202_location", "location", postgresql_using="gist"),
+        Index("ix_hud_section_202_state", "state"),
+    )
