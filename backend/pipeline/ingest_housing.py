@@ -920,6 +920,19 @@ async def _ingest_hud_qct_async() -> dict:
                 reject[_qct_rejection_reason(r) or "filtered_out_by_rule"] += 1
 
         rows = [{**row, "boundary": None} for row in rows]
+        # Deduplicate by unique key — HUD source data may contain duplicate
+        # tract entries, and PostgreSQL's ON CONFLICT DO UPDATE cannot touch
+        # the same row twice in a single statement.
+        seen_keys: set[tuple] = set()
+        deduped: list[dict] = []
+        for row in rows:
+            key = (row.get("designation_year"), row.get("designation_type"), row.get("geoid11"))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(row)
+        if len(deduped) < len(rows):
+            logger.info("HUD qct deduplicated %d → %d rows", len(rows), len(deduped))
+        rows = deduped
         logger.info("HUD qct normalized_rows_prepared=%s", len(rows))
 
         inserted = 0
