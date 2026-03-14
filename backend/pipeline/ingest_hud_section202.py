@@ -85,7 +85,10 @@ async def _fetch_all_features() -> list[dict]:
             "HUD Section 202 fetch: offset=%d page_size=%d fetched=%d total_so_far=%d",
             offset, len(features), len(features), len(all_features),
         )
-        if len(features) < ARCGIS_PAGE_SIZE:
+        # ArcGIS servers enforce their own maxRecordCount (often 1000)
+        # which may be lower than our requested page size.  The reliable
+        # signal is the exceededTransferLimit flag in the response.
+        if not payload.get("exceededTransferLimit", False):
             break
         offset += len(features)
     logger.info("HUD Section 202 total features fetched: %d", len(all_features))
