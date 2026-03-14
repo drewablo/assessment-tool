@@ -443,17 +443,24 @@ async def _ingest_state(state_fips: str, vintage: str = "2022") -> tuple[int, in
         tract["centroid"] = from_shape(Point(geom.representative_point().x, geom.representative_point().y), srid=4326)
         geo_enriched += 1
 
+    # Chunk upserts — large states (CA, TX, FL) have 8000+ tracts.
+    # A single INSERT ... VALUES with geometry WKB for all of them
+    # can exceed PostgreSQL bind-parameter limits or cause timeouts
+    # when multiple states run concurrently.
+    _CENSUS_BATCH = 500
     async with async_session_factory() as session:
-        stmt = pg_insert(CensusTract).values(tract_dicts)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["geoid"],
-            set_={
-                col: stmt.excluded[col]
-                for col in tract_dicts[0].keys()
-                if col != "geoid"
-            },
-        )
-        await session.execute(stmt)
+        for chunk_start in range(0, len(tract_dicts), _CENSUS_BATCH):
+            chunk = tract_dicts[chunk_start : chunk_start + _CENSUS_BATCH]
+            stmt = pg_insert(CensusTract).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["geoid"],
+                set_={
+                    col: stmt.excluded[col]
+                    for col in chunk[0].keys()
+                    if col != "geoid"
+                },
+            )
+            await session.execute(stmt)
         backfilled = await backfill_census_centroids(session, state_fips=state_fips)
         await session.commit()
 
@@ -503,12 +510,12 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
         run = await start_pipeline_run(session, "census_acs")
         await session.commit()
 
-    # Process states one at a time to respect Census API rate limits.
-    # Without an API key the Census Bureau aggressively rate-limits,
-    # returning header-only (empty) responses that previously caused
-    # 28+ state failures in batch-of-2 mode.
-    batch_size = 1 if not CENSUS_API_KEY else 3
-    inter_batch_delay = 2.0 if not CENSUS_API_KEY else 0.5
+    # Process states in small concurrent batches.
+    # Keep batch size modest — each state's DB upsert can be large
+    # (8000+ tracts with geometry), and running too many concurrently
+    # exhausts the connection pool or hits bind-parameter limits.
+    batch_size = 2 if not CENSUS_API_KEY else 3
+    inter_batch_delay = 2.0 if not CENSUS_API_KEY else 1.0
 
     for i in range(0, len(target_states), batch_size):
         batch = target_states[i : i + batch_size]
