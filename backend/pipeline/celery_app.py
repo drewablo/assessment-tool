@@ -16,6 +16,7 @@ celery_app = Celery(
         "pipeline.ingest_schools",
         "pipeline.ingest_elder_care",
         "pipeline.ingest_housing",
+        "pipeline.ingest_hud_section202",
     ],
 )
 
@@ -55,6 +56,12 @@ celery_app.conf.beat_schedule = {
     "refresh-hud-lihtc": {
         "task": "pipeline.ingest_housing.ingest_lihtc_data",
         "schedule": crontab(month_of_year="3", day_of_month="1", hour="5", minute="0"),
+        "args": (),
+    },
+    # HUD Section 202: updated infrequently; check quarterly
+    "refresh-hud-section-202": {
+        "task": "pipeline.ingest_hud_section202.ingest_hud_section202",
+        "schedule": crontab(month_of_year="*/3", day_of_month="15", hour="5", minute="30"),
         "args": (),
     },
 }
