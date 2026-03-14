@@ -37,6 +37,7 @@ def test_pipeline_diagnostics_ready_when_counts_and_runs_are_healthy():
         "housing_projects": 2,
         "hud_lihtc_tenant": 1,
         "hud_qct_dda": 1,
+        "hud_section_202": 5,
     }
     pipelines = {
         name: {
@@ -44,7 +45,7 @@ def test_pipeline_diagnostics_ready_when_counts_and_runs_are_healthy():
             "freshness_status": "fresh",
             "last_failure": {"error_message": None},
         }
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]
     }
 
     diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
@@ -87,6 +88,7 @@ def test_pipeline_diagnostics_ready_when_hud_normalized_tables_populated_without
         "hud_lihtc_property": 12,
         "hud_lihtc_tenant": 8,
         "hud_qct_dda": 4,
+        "hud_section_202": 3,
     }
     pipelines = {
         name: {
@@ -94,7 +96,7 @@ def test_pipeline_diagnostics_ready_when_hud_normalized_tables_populated_without
             "freshness_status": "fresh",
             "last_failure": {"error_message": None},
         }
-        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda"]
+        for name in ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]
     }
 
     diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
@@ -249,3 +251,45 @@ def test_pipeline_diagnostics_qct_empty_does_not_block_when_lihtc_property_has_d
     assert any("hud_qct_dda" in d for d in diagnostics)
     # But not blocking
     assert readiness_status == "ready_with_fallbacks"
+
+
+def test_pipeline_diagnostics_ready_with_fallbacks_section202_empty_and_qct_failure():
+    """Matches production scenario: all required data present, hud_section_202
+    empty (never completed), hud_qct_dda has data but a recent failure logged."""
+    counts = {
+        "census_tracts": 84415,
+        "schools": 20923,
+        "elder_care_facilities": 14710,
+        "housing_projects": 0,
+        "hud_lihtc_property": 51846,
+        "hud_lihtc_tenant": 24020,
+        "hud_qct_dda": 7334,
+        "hud_section_202": 0,
+    }
+    pipelines = {
+        "census_acs": {"last_success": "2026-03-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "nces_pss": {"last_success": "2026-03-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "cms_elder_care": {"last_success": "2026-03-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "hud_lihtc_property": {"last_success": "2026-03-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "hud_lihtc_tenant": {"last_success": "2026-03-01T00:00:00+00:00", "freshness_status": "fresh", "last_failure": {"error_message": None}},
+        "hud_qct_dda": {
+            "last_success": "2026-03-01T00:00:00+00:00",
+            "freshness_status": "fresh",
+            "last_failure": {"error_message": "CardinalityViolationError: ON CONFLICT DO UPDATE command cannot affect row a second time"},
+        },
+        "hud_section_202": {"last_success": None, "freshness_status": "unknown", "last_failure": {"error_message": None}},
+    }
+
+    diagnostics, ready, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
+
+    # DB is ready — all required tables populated
+    assert ready is True
+    assert readiness_status == "ready_with_fallbacks"
+    # Section 202 empty → optional enrichment warning
+    assert any("hud_section_202" in d and "0 rows" in d for d in diagnostics)
+    # Section 202 never completed → informational diagnostic
+    assert any("hud_section_202" in d and "never completed" in d for d in diagnostics)
+    # QCT recent failure surfaced
+    assert any("hud_qct_dda" in d and "recent failure" in d for d in diagnostics)
+    # NOT blocking
+    assert not any("not_ready" in readiness_status for _ in [1])
