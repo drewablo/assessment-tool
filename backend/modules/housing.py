@@ -330,6 +330,7 @@ async def _get_nearby_section_202_db(*, lat: float, lon: float, radius_miles: fl
     """Fetch nearby HUD Section 202 senior housing properties from the database."""
     from db.connection import get_session
     from db.queries import get_nearby_section_202
+    from sqlalchemy import text
 
     async with get_session() as session:
         rows = await get_nearby_section_202(
@@ -339,6 +340,21 @@ async def _get_nearby_section_202_db(*, lat: float, lon: float, radius_miles: fl
             radius_miles=radius_miles,
             limit=50,
         )
+        if not rows:
+            # Diagnostic: check if data exists and if coordinates are valid
+            diag = await session.execute(text(
+                "SELECT COUNT(*), "
+                "MIN(lat), MAX(lat), MIN(lon), MAX(lon) "
+                "FROM hud_section_202_properties"
+            ))
+            row = diag.one_or_none()
+            if row:
+                logger.warning(
+                    "HUD Section 202 diagnostic: total_rows=%s lat_range=[%.4f, %.4f] lon_range=[%.4f, %.4f] "
+                    "(query was lat=%.4f lon=%.4f radius=%.1f mi)",
+                    row[0], row[1] or 0, row[2] or 0, row[3] or 0, row[4] or 0,
+                    lat, lon, radius_miles,
+                )
     mapped: list[dict] = []
     for prop, distance in rows:
         mapped.append(
@@ -407,6 +423,10 @@ async def analyze_housing(
                     lat=location["lat"],
                     lon=location["lon"],
                     radius_miles=radius_miles,
+                )
+                logger.info(
+                    "HUD Section 202 DB query: lat=%.4f lon=%.4f radius=%.1f returned=%d",
+                    location["lat"], location["lon"], radius_miles, len(section_202_projects),
                 )
             except Exception as exc:
                 logger.warning("HUD Section 202 DB query failed (non-blocking): %s", exc)

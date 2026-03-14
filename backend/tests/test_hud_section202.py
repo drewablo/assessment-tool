@@ -547,6 +547,32 @@ def test_esri_feature_to_geojson():
     assert result["properties"]["OBJECTID"] == 1
 
 
+def test_esri_feature_to_geojson_reprojects_web_mercator():
+    """Web Mercator coordinates (EPSG:3857) should be reprojected to WGS84."""
+    from pipeline.ingest_hud_section202 import _esri_feature_to_geojson
+
+    # Chicago in Web Mercator: approximately x=-9757148, y=5138535
+    esri = {
+        "attributes": {"OBJECTID": 2, "SERVICING_SITE_NAME_TEXT": "Mercator Test"},
+        "geometry": {"x": -9757148.44, "y": 5138535.07},
+    }
+    result = _esri_feature_to_geojson(esri)
+    lon, lat = result["geometry"]["coordinates"]
+    # Should be approximately Chicago: lat ~41.88, lon ~-87.63
+    assert -88.0 < lon < -87.0, f"Expected lon near -87.63, got {lon}"
+    assert 41.5 < lat < 42.5, f"Expected lat near 41.88, got {lat}"
+
+
+def test_rejection_reason_out_of_range_coordinates():
+    """Coordinates outside WGS84 range should be rejected after reprojection fails."""
+    from pipeline.ingest_hud_section202 import _rejection_reason
+
+    # After _esri_feature_to_geojson reprojection, coords should be valid WGS84,
+    # but if somehow they're still out of range, rejection should catch it
+    feature = _make_feature(lon=500.0, lat=500.0)
+    assert _rejection_reason(feature) == "coordinates_out_of_wgs84_range"
+
+
 # ---------------------------------------------------------------------------
 # Pagination: exceededTransferLimit (Esri JSON)
 # ---------------------------------------------------------------------------
