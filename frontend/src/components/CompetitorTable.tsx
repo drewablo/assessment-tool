@@ -49,7 +49,7 @@ function SortHeader({
 }
 
 function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiusMiles, catchmentLabel, ministryType = "schools" }: Props) {
-  const [filter, setFilter] = useState<"all" | "catholic" | "other">("all");
+  const [filter, setFilter] = useState<"all" | "catholic" | "other" | "section202" | "lihtc">("all");
   const [sortCol, setSortCol] = useState<SortCol | null>("distance_miles");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(0);
@@ -64,7 +64,7 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
     }
   }
 
-  function handleFilter(f: "all" | "catholic" | "other") {
+  function handleFilter(f: "all" | "catholic" | "other" | "section202" | "lihtc") {
     setFilter(f);
     setPage(0);
   }
@@ -73,6 +73,8 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
     const filtered = schools.filter((s) => {
       if (filter === "catholic") return s.is_catholic;
       if (filter === "other") return !s.is_catholic;
+      if (filter === "section202") return s.affiliation === "HUD Section 202";
+      if (filter === "lihtc") return s.affiliation !== "HUD Section 202";
       return true;
     });
     return [...filtered].sort((a, b) => {
@@ -133,7 +135,12 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
       ) : (
         <>
           <div className="flex gap-2 mb-3">
-            {(ministryType === "schools" ? (["all", "catholic", "other"] as const) : (["all"] as const)).map((f) => (
+            {(ministryType === "schools"
+              ? (["all", "catholic", "other"] as const)
+              : ministryType === "housing" && schools.some((s) => s.affiliation === "HUD Section 202")
+              ? (["all", "section202", "lihtc"] as const)
+              : (["all"] as const)
+            ).map((f) => (
               <button
                 key={f}
                 onClick={() => handleFilter(f)}
@@ -143,7 +150,7 @@ function CompetitorTableInner({ schools, catholicCount, totalPrivateCount, radiu
                     : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
               >
-                {f === "all" ? "All" : f === "catholic" ? "Catholic" : "Other Private"}
+                {f === "all" ? "All" : f === "catholic" ? "Catholic" : f === "other" ? "Other Private" : f === "section202" ? "Section 202" : "LIHTC"}
               </button>
             ))}
           </div>
