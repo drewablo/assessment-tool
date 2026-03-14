@@ -101,8 +101,8 @@ TIGER_SHAPEFILE_BASE = "https://www2.census.gov/geo/tiger/TIGER{year}/TRACT"
 TIGER_SHAPEFILE_VINTAGE = os.getenv("TIGER_VINTAGE", "2022")
 
 # Retry settings for Census API and TIGER downloads
-_MAX_RETRIES = 3
-_RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16
+_MAX_RETRIES = 4
+_RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16, 32
 
 
 async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> dict | list:
@@ -503,9 +503,13 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
         run = await start_pipeline_run(session, "census_acs")
         await session.commit()
 
-    # Process states sequentially in small batches.
-    # Batch size of 2 avoids Census API rate limits (especially without API key).
-    batch_size = 2 if not CENSUS_API_KEY else 5
+    # Process states one at a time to respect Census API rate limits.
+    # Without an API key the Census Bureau aggressively rate-limits,
+    # returning header-only (empty) responses that previously caused
+    # 28+ state failures in batch-of-2 mode.
+    batch_size = 1 if not CENSUS_API_KEY else 3
+    inter_batch_delay = 2.0 if not CENSUS_API_KEY else 0.5
+
     for i in range(0, len(target_states), batch_size):
         batch = target_states[i : i + batch_size]
         tasks = [_ingest_state(st, vintage) for st in batch]
@@ -527,9 +531,36 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
                     errors.append(f"State {st}: ACS returned 0 tracts (possible API issue)")
                     logger.error("State %s: ACS returned 0 tracts — treating as failure", st)
 
-        # Brief pause between batches to respect rate limits
+        # Pause between batches to respect Census API rate limits
         if i + batch_size < len(target_states):
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(inter_batch_delay)
+
+    # Retry failed states once — rate-limit failures are often transient
+    if failed_states and len(failed_states) < len(target_states):
+        retry_states = list(failed_states)
+        logger.info("Retrying %d failed states after a cooldown pause...", len(retry_states))
+        await asyncio.sleep(10.0)
+        failed_states.clear()
+        retry_errors = []
+        for st in retry_states:
+            try:
+                tracts, geo = await _ingest_state(st, vintage)
+                if tracts > 0:
+                    total_tracts += tracts
+                    total_geo += geo
+                    succeeded_states.append(st)
+                    # Remove the original error for this state
+                    errors = [e for e in errors if not e.startswith(f"State {st}:")]
+                    logger.info("Retry succeeded for state %s: %d tracts", st, tracts)
+                else:
+                    failed_states.append(st)
+                    retry_errors.append(f"State {st}: ACS returned 0 tracts on retry")
+            except Exception as exc:
+                failed_states.append(st)
+                retry_errors.append(f"State {st}: retry failed: {exc}")
+                logger.error("Retry FAILED for state %s: %s", st, exc)
+            await asyncio.sleep(inter_batch_delay)
+        errors.extend(retry_errors)
 
     # Determine pipeline status
     if len(failed_states) == 0:
