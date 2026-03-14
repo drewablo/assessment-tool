@@ -152,7 +152,9 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
         info = pipelines.get(name) or {}
         freshness = info.get("freshness_status")
         last_success = info.get("last_success")
-        last_failure = (info.get("last_failure") or {}).get("error_message")
+        last_failure_info = info.get("last_failure") or {}
+        last_failure = last_failure_info.get("error_message")
+        last_failure_at = last_failure_info.get("finished_at")
 
         # Resolve whether the *table* backing this pipeline has data.
         backing_table = pipeline_to_table.get(name)
@@ -179,9 +181,16 @@ def _build_pipeline_diagnostics(counts: dict, pipelines: dict) -> tuple[list[str
                 diagnostics.append(msg)
 
         if last_failure:
-            diagnostics.append(
-                f"Pipeline '{name}' has a recent failure: {str(last_failure)[:200]}"
-            )
+            # Only surface the failure if it is more recent than the last
+            # success, or if there has never been a successful run.  A
+            # failure that predates a subsequent success is resolved.
+            failure_is_recent = True
+            if last_success and last_failure_at:
+                failure_is_recent = last_failure_at > last_success
+            if failure_is_recent:
+                diagnostics.append(
+                    f"Pipeline '{name}' has a recent failure: {str(last_failure)[:200]}"
+                )
 
     all_diagnostics = [*blocking_diagnostics, *tracking_warnings, *diagnostics]
     db_ready_for_analysis = len(blocking_diagnostics) == 0
