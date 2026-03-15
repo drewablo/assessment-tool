@@ -241,6 +241,7 @@ class DemographicData(BaseModel):
     seniors_65_plus: Optional[int] = None
     seniors_75_plus: Optional[int] = None
     seniors_living_alone: Optional[int] = None
+    seniors_below_200pct_poverty: Optional[int] = None
     seniors_projected_5yr: Optional[int] = None
     seniors_projected_10yr: Optional[int] = None
     # Housing-specific demographic detail

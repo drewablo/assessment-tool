@@ -6,10 +6,12 @@ Replaces the live Census API call in api/census.py with a DB-backed version.
 import logging
 from typing import Optional
 
+from geoalchemy2.shape import to_shape
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import CensusTract, CensusTractHistory
 from db.queries import get_historical_tracts, get_tracts_by_county, get_tracts_by_state, get_tracts_in_catchment
+from utils import bearing, direction_from_bearing
 
 logger = logging.getLogger("db.demographics")
 
@@ -220,6 +222,49 @@ async def aggregate_demographics(
         + income_brackets.get("200k_plus", 0)
     )
 
+    # Build seniors_by_direction using tract centroids and bearing from analysis center
+    seniors_by_direction: dict[str, dict] = {}
+    dir_buckets: dict[str, dict[str, float]] = {
+        d: {"seniors_65_plus": 0.0, "seniors_75_plus": 0.0,
+            "seniors_living_alone": 0.0, "seniors_below_poverty": 0.0}
+        for d in ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    }
+    for t in tracts:
+        if t.centroid is None:
+            continue
+        try:
+            pt = to_shape(t.centroid)
+            tract_lat, tract_lon = pt.y, pt.x
+        except Exception:
+            continue
+        b = bearing(lat, lon, tract_lat, tract_lon)
+        d = direction_from_bearing(b)
+        s65 = (t.population_65_74 or 0) + (t.population_75_plus or 0)
+        dir_buckets[d]["seniors_65_plus"] += s65
+        dir_buckets[d]["seniors_75_plus"] += t.population_75_plus or 0
+        dir_buckets[d]["seniors_living_alone"] += t.seniors_living_alone or 0
+        dir_buckets[d]["seniors_below_poverty"] += t.seniors_below_poverty or 0
+
+    for d, vals in dir_buckets.items():
+        s65 = round(vals["seniors_65_plus"])
+        alone = round(vals["seniors_living_alone"])
+        seniors_by_direction[d] = {
+            "seniors_65_plus": s65,
+            "seniors_75_plus": round(vals["seniors_75_plus"]),
+            "seniors_living_alone": alone,
+            "seniors_below_poverty": round(vals["seniors_below_poverty"]),
+            "isolation_ratio": round(alone / s65, 3) if s65 > 0 else None,
+        }
+
+    # Derive county_name from tracts (use first available county_fips → state lookup)
+    county_name = None
+    if tracts:
+        first_county = tracts[0].county_fips
+        first_state = tracts[0].state_fips
+        state_abbr_local = STATE_FIPS_TO_ABBR.get(first_state, "")
+        if first_county and state_abbr_local:
+            county_name = f"FIPS {first_county}, {state_abbr_local}"
+
     # Income distribution in (midpoint, count) tuple format expected by analysis.py
     _BRACKET_MIDPOINTS = [
         ("under_10k", 5_000), ("10k_15k", 12_500), ("15k_25k", 20_000),
@@ -258,8 +303,10 @@ async def aggregate_demographics(
         "income_brackets": income_brackets,
         "income_distribution": income_distribution,
         "population_below_poverty": below_poverty,
-        "seniors_below_poverty": seniors_below_poverty,
+        "seniors_below_200pct_poverty": seniors_below_poverty,
         "seniors_living_alone": seniors_living_alone,
+        "seniors_by_direction": seniors_by_direction,
+        "county_name": county_name,
         "owner_occupied": owner_occupied,
         "renter_occupied": renter_occupied,
         "private_school_enrolled": total_enrolled_private_k_12,
@@ -309,6 +356,11 @@ def _empty_demographics(state_fips: str) -> dict:
         "gravity_weighted_school_age_pop": 0,
         "population_under_5": 0,
         "seniors_65_plus": 0,
+        "seniors_65_74": 0,
+        "seniors_75_plus": 0,
+        "seniors_living_alone": 0,
+        "seniors_below_200pct_poverty": 0,
+        "seniors_by_direction": {},
         "median_household_income": None,
         "total_households": 0,
         "families_with_children": 0,
@@ -322,4 +374,5 @@ def _empty_demographics(state_fips: str) -> dict:
         "tract_count": 0,
         "income_brackets": {},
         "income_distribution": [],
+        "county_name": None,
     }

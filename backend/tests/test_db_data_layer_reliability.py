@@ -50,6 +50,8 @@ async def test_aggregate_demographics_uses_county_fallback_when_spatial_empty(mo
 
     tract = types.SimpleNamespace(
         geoid="42091234567",
+        state_fips="42",
+        county_fips="42091",
         total_population=1000,
         population_under_18=200,
         population_5_17=120,
@@ -78,6 +80,7 @@ async def test_aggregate_demographics_uses_county_fallback_when_spatial_empty(mo
         income_bracket_200k_plus=10,
         median_household_income=65000,
         income_cv=15.0,
+        centroid=None,
     )
 
     async def fake_county(*_args, **_kwargs):
