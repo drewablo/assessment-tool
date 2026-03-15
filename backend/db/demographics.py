@@ -208,10 +208,38 @@ async def aggregate_demographics(
     else:
         data_confidence = "low"
 
+    # The DB stores combined population_5_17.  The analysis code needs the
+    # 5-to-11 / 12-to-17 split (7 year-groups vs 6 year-groups).
+    pop_5_to_11 = int(round(total_5_17 * 7 / 13)) if total_5_17 else 0
+    pop_12_to_17 = total_5_17 - pop_5_to_11
+
+    # High-income households ($100k+) — mirrors _HIGH_INCOME_VARS in census.py
+    high_income_households = (
+        income_brackets.get("100k_150k", 0)
+        + income_brackets.get("150k_200k", 0)
+        + income_brackets.get("200k_plus", 0)
+    )
+
+    # Income distribution in (midpoint, count) tuple format expected by analysis.py
+    _BRACKET_MIDPOINTS = [
+        ("under_10k", 5_000), ("10k_15k", 12_500), ("15k_25k", 20_000),
+        ("25k_35k", 30_000), ("35k_50k", 42_500), ("50k_75k", 62_500),
+        ("75k_100k", 87_500), ("100k_150k", 125_000), ("150k_200k", 175_000),
+        ("200k_plus", 250_000),
+    ]
+    income_distribution = [
+        (midpoint, income_brackets.get(key, 0))
+        for key, midpoint in _BRACKET_MIDPOINTS
+    ]
+
     return {
         "total_population": total_pop,
         "population_under_18": total_under_18,
         "school_age_population": total_5_17,
+        "population_5_to_11": pop_5_to_11,
+        "population_12_to_17": pop_12_to_17,
+        "gravity_weighted_school_age_pop": total_5_17,
+        "population_under_5": total_under_5,
         "seniors_65_plus": total_65_74 + total_75_plus,
         "seniors_65_74": total_65_74,
         "seniors_75_plus": total_75_plus,
@@ -220,17 +248,20 @@ async def aggregate_demographics(
         "family_households": total_families,
         "families_with_children": families_with_children,
         "owner_occupied_pct": owner_pct,
+        "owner_occupied_units": owner_occupied,
+        "total_housing_units": owner_occupied + renter_occupied if (owner_occupied + renter_occupied) > 0 else None,
+        "high_income_households": high_income_households,
         "estimated_catholic_pct": estimated_catholic_pct,
         "data_geography": "state_fallback" if used_state_fallback else ("county_fallback" if used_county_fallback else "tract"),
         "data_confidence": data_confidence,
         "tract_count": len(tracts),
         "income_brackets": income_brackets,
+        "income_distribution": income_distribution,
         "population_below_poverty": below_poverty,
         "seniors_below_poverty": seniors_below_poverty,
         "seniors_living_alone": seniors_living_alone,
         "owner_occupied": owner_occupied,
         "renter_occupied": renter_occupied,
-        "population_under_5": total_under_5,
         "private_school_enrolled": total_enrolled_private_k_12,
         "total_school_enrolled": total_enrolled_k_12,
         "historical_2017": historical_2017,
@@ -273,14 +304,22 @@ def _empty_demographics(state_fips: str) -> dict:
         "total_population": 0,
         "population_under_18": 0,
         "school_age_population": 0,
+        "population_5_to_11": 0,
+        "population_12_to_17": 0,
+        "gravity_weighted_school_age_pop": 0,
+        "population_under_5": 0,
         "seniors_65_plus": 0,
         "median_household_income": None,
         "total_households": 0,
         "families_with_children": 0,
         "owner_occupied_pct": None,
+        "owner_occupied_units": None,
+        "total_housing_units": None,
+        "high_income_households": 0,
         "estimated_catholic_pct": CARA_CATHOLIC_PCT.get(state_abbr, 0.12),
         "data_geography": "tract",
         "data_confidence": "low",
         "tract_count": 0,
         "income_brackets": {},
+        "income_distribution": [],
     }
