@@ -86,3 +86,22 @@ def test_shapefile_record_to_geometry_builds_multipolygon():
     geom = ingest_census._shapefile_record_to_geometry(_MockShape())
     assert geom is not None
     assert geom.geom_type == "MultiPolygon"
+
+
+def test_census_transform_populates_senior_support_fields():
+    row = {
+        "state": "42",
+        "county": "091",
+        "tract": "012300",
+        "NAME": "Census Tract 123",
+        "B17001_015E": "10",
+        "B17001_016E": "5",
+        "B17001_029E": "8",
+        "B17001_030E": "7",
+        "B11010_003E": "12",
+        "B11010_006E": "19",
+    }
+    transformed = ingest_census._transform_tract(row)
+
+    assert transformed["seniors_below_poverty"] == 30
+    assert transformed["seniors_living_alone"] == 31

@@ -350,7 +350,25 @@ async def analyze_elder_care(
             request.care_level,
             request.min_mds_overall_rating,
         )
+
+    if demographics.get("seniors_65_plus") and not demographics.get("seniors_living_alone") and not demographics.get("seniors_below_200pct_poverty"):
+        logger.warning(
+            "Senior demographics appear partially hydrated (65+ present but living-alone/poverty missing). "
+            "This commonly indicates legacy census_tracts rows ingested before B11010/B17001 senior fields were added. "
+            "location=(%.5f, %.5f) tract_count=%s",
+            location["lat"],
+            location["lon"],
+            demographics.get("tract_count"),
+        )
+
     scores = _score_elder_care(demographics, facilities, request.mission_mode)
+    logger.info(
+        "Elder-care saturation inputs target_pop=%s weighted_beds=%.2f facilities=%d saturation_ratio=%.4f",
+        int(round(scores["target_pop"])),
+        scores["weighted_beds"],
+        len(facilities),
+        scores["saturation_ratio"],
+    )
 
     # Workforce availability index (BLS QCEW)
     county_fips = location.get("county_fips", "")
@@ -474,6 +492,8 @@ async def analyze_elder_care(
             seniors_below_200pct_poverty=seniors_below_200pct_poverty or None,
             seniors_projected_5yr=seniors_projected_5yr,
             seniors_projected_10yr=seniors_projected_10yr,
+            elder_care_weighted_competitor_beds=round(scores["weighted_beds"], 2),
+            elder_care_bed_saturation_ratio=round(scores["saturation_ratio"], 4),
         ),
         competitor_schools=[
             CompetitorSchool(

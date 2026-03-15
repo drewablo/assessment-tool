@@ -66,6 +66,13 @@ ACS_VARIABLES = {
     "B25003_003E": "renter_occupied",
     # Poverty (B17001)
     "B17001_002E": "population_below_poverty",
+    "B17001_015E": "male_65_74_below_poverty",
+    "B17001_016E": "male_75_plus_below_poverty",
+    "B17001_029E": "female_65_74_below_poverty",
+    "B17001_030E": "female_75_plus_below_poverty",
+    # Seniors living alone (B11010)
+    "B11010_003E": "male_65_plus_living_alone",
+    "B11010_006E": "female_65_plus_living_alone",
     # Age detail for under-5, 5-17, 65-74, 75+ (B01001 detail)
     "B01001_003E": "male_under_5",
     "B01001_004E": "male_5_9",
@@ -378,6 +385,22 @@ def _transform_tract(row: dict, vintage: str = "2022") -> dict:
     if parts:
         families_with_children = sum(parts)
 
+    seniors_below_poverty = None
+    male_65_74_below = _safe_int(mapped.get("male_65_74_below_poverty"))
+    male_75_plus_below = _safe_int(mapped.get("male_75_plus_below_poverty"))
+    female_65_74_below = _safe_int(mapped.get("female_65_74_below_poverty"))
+    female_75_plus_below = _safe_int(mapped.get("female_75_plus_below_poverty"))
+    seniors_poverty_parts = [v for v in [male_65_74_below, male_75_plus_below, female_65_74_below, female_75_plus_below] if v is not None]
+    if seniors_poverty_parts:
+        seniors_below_poverty = sum(seniors_poverty_parts)
+
+    seniors_living_alone = None
+    male_living_alone = _safe_int(mapped.get("male_65_plus_living_alone"))
+    female_living_alone = _safe_int(mapped.get("female_65_plus_living_alone"))
+    seniors_alone_parts = [v for v in [male_living_alone, female_living_alone] if v is not None]
+    if seniors_alone_parts:
+        seniors_living_alone = sum(seniors_alone_parts)
+
     return {
         "geoid": geoid,
         "state_fips": state,
@@ -410,6 +433,8 @@ def _transform_tract(row: dict, vintage: str = "2022") -> dict:
         "owner_occupied": _safe_int(mapped.get("owner_occupied")),
         "renter_occupied": _safe_int(mapped.get("renter_occupied")),
         "population_below_poverty": _safe_int(mapped.get("population_below_poverty")),
+        "seniors_below_poverty": seniors_below_poverty,
+        "seniors_living_alone": seniors_living_alone,
         "income_cv": income_cv,
         "acs_vintage": vintage,
         # Ensure geometry keys are always present (NULL until enriched)

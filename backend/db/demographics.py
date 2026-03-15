@@ -215,6 +215,17 @@ async def aggregate_demographics(
     pop_5_to_11 = int(round(total_5_17 * 7 / 13)) if total_5_17 else 0
     pop_12_to_17 = total_5_17 - pop_5_to_11
 
+    seniors_65_plus_total = total_65_74 + total_75_plus
+    if seniors_65_plus_total > 0 and seniors_living_alone == 0 and seniors_below_poverty == 0:
+        logger.warning(
+            "DB demographics contain seniors_65_plus but zero seniors_living_alone and seniors_below_poverty. "
+            "This usually indicates legacy census ingest missing B11010/B17001 senior fields. "
+            "state_fips=%s county_fips=%s tract_count=%d",
+            state_fips,
+            county_fips,
+            len(tracts),
+        )
+
     # High-income households ($100k+) — mirrors _HIGH_INCOME_VARS in census.py
     high_income_households = (
         income_brackets.get("100k_150k", 0)
@@ -285,7 +296,7 @@ async def aggregate_demographics(
         "population_12_to_17": pop_12_to_17,
         "gravity_weighted_school_age_pop": total_5_17,
         "population_under_5": total_under_5,
-        "seniors_65_plus": total_65_74 + total_75_plus,
+        "seniors_65_plus": seniors_65_plus_total,
         "seniors_65_74": total_65_74,
         "seniors_75_plus": total_75_plus,
         "median_household_income": median_hh_income,
