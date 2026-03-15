@@ -60,6 +60,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_TTL = int(os.getenv("ANALYSIS_CACHE_TTL", "86400"))  # 24 hours default
 DEFAULT_RUN_MODE = os.getenv("ANALYSIS_RUN_MODE", "db_with_fallback")
 SNAPSHOT_TTL = int(os.getenv("ANALYSIS_SNAPSHOT_TTL", "86400"))
+CACHE_SCHEMA_VERSION = os.getenv("ANALYSIS_CACHE_SCHEMA_VERSION", "2026-03-senior-metrics-v2")
 
 # Global Redis connection state
 _redis = None
@@ -702,6 +703,7 @@ def _mark_redis_failure():
 def _cache_key(request: AnalysisRequest) -> str:
     """Stable cache key from analysis request fields that affect output."""
     payload = json.dumps({
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
         "ministry_type": request.ministry_type,
         "address": request.address.strip().lower(),
         "drive_minutes": request.drive_minutes,
@@ -1557,6 +1559,68 @@ async def scoring_weights():
     }
 
 
+def _needs_live_senior_enrichment(demographics: dict | None, ministry_type: str) -> bool:
+    """Return True when DB demographics appear incomplete for elder-care analysis."""
+    if ministry_type != "elder_care" or not demographics:
+        return False
+
+    seniors_65_plus = demographics.get("seniors_65_plus") or 0
+    seniors_75_plus = demographics.get("seniors_75_plus")
+    seniors_living_alone = demographics.get("seniors_living_alone")
+    seniors_below_poverty = demographics.get("seniors_below_200pct_poverty")
+
+    if seniors_65_plus <= 0:
+        return True
+
+    # Legacy census_tract ingests can contain age buckets while omitting B11010/B17001
+    # senior-support fields. Both metrics being zero for a material senior population
+    # is suspicious and should trigger live enrichment.
+    missing_support_metrics = (
+        (seniors_living_alone is None and seniors_below_poverty is None)
+        or (seniors_65_plus >= 250 and (seniors_living_alone or 0) == 0 and (seniors_below_poverty or 0) == 0)
+    )
+
+    missing_age_split = seniors_75_plus is None
+
+    return missing_support_metrics or missing_age_split
+
+
+def _merge_live_senior_demographics(db_demo: dict, live_demo: dict) -> tuple[dict, bool]:
+    merged = dict(db_demo or {})
+    changed = False
+
+    senior_keys = [
+        "seniors_65_plus",
+        "seniors_75_plus",
+        "seniors_living_alone",
+        "seniors_below_200pct_poverty",
+        "seniors_by_direction",
+    ]
+
+    for key in senior_keys:
+        db_val = merged.get(key)
+        live_val = (live_demo or {}).get(key)
+        if live_val is None:
+            continue
+        if db_val is None:
+            merged[key] = live_val
+            changed = True
+            continue
+        if isinstance(db_val, (int, float)) and isinstance(live_val, (int, float)) and db_val == 0 and live_val > 0:
+            merged[key] = live_val
+            changed = True
+            continue
+        if key == "seniors_by_direction" and not db_val and live_val:
+            merged[key] = live_val
+            changed = True
+
+    if changed:
+        merged["senior_metrics_source"] = "live_enriched"
+
+    return merged, changed
+
+
+
 async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str = DEFAULT_RUN_MODE) -> tuple[AnalysisResponse, dict]:
     """
     Orchestrate the full analysis pipeline:
@@ -1672,6 +1736,27 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
             isochrone_polygon=isochrone_polygon,
         )
 
+    used_live_senior_enrichment = False
+    if USE_DB and not used_live_demographics_fallback and _needs_live_senior_enrichment(demographics, request.ministry_type):
+        live_senior_demographics = await get_demographics(
+            lat=location["lat"],
+            lon=location["lon"],
+            county_fips=location["county_fips"],
+            state_fips=location["state_fips"],
+            radius_miles=effective_radius,
+            isochrone_polygon=isochrone_polygon,
+        )
+        demographics, used_live_senior_enrichment = _merge_live_senior_demographics(demographics or {}, live_senior_demographics or {})
+        if used_live_senior_enrichment:
+            logger.warning(
+                "DB demographics were partially populated for elder-care metrics; enriched missing senior fields from live Census API. "
+                "location=(lat=%.6f lon=%.6f radius=%.2f)",
+                location["lat"],
+                location["lon"],
+                effective_radius,
+            )
+            fallback_notes.append("DB senior demographics incomplete; enriched missing senior fields from live Census API.")
+
     # Step 3: Dispatch to ministry module analyzer
     module = MODULE_REGISTRY.get(request.ministry_type, MODULE_REGISTRY["schools"])
     result = await module.analyzer(
@@ -1732,6 +1817,7 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
 
     return result, {
         "used_live_demographics_fallback": used_live_demographics_fallback,
+        "used_live_senior_enrichment": used_live_senior_enrichment,
         "fallback_notes": fallback_notes,
         "catchment_type": catchment_type,
         "effective_source_counts": effective_source_counts,

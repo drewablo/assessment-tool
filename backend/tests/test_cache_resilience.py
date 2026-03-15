@@ -38,6 +38,18 @@ class _Result:
         return "{}"
 
 
+def test_cache_key_includes_schema_version(monkeypatch):
+    req = AnalysisRequest(school_name="X", address="123 Main", ministry_type="elder_care")
+
+    monkeypatch.setattr(main, "CACHE_SCHEMA_VERSION", "v1")
+    key_v1 = main._cache_key(req)
+
+    monkeypatch.setattr(main, "CACHE_SCHEMA_VERSION", "v2")
+    key_v2 = main._cache_key(req)
+
+    assert key_v1 != key_v2
+
+
 @pytest.mark.asyncio
 async def test_compare_uses_cached_analysis_when_available(monkeypatch):
     async def fake_geocode(_address):
@@ -47,7 +59,7 @@ async def test_compare_uses_cached_analysis_when_available(monkeypatch):
 
     async def fake_run(_location, request):
         run_calls.append(request.ministry_type)
-        return _Result(request.ministry_type, 60)
+        return _Result(request.ministry_type, 60), {}
 
     monkeypatch.setattr(main, "geocode_address", fake_geocode)
     monkeypatch.setattr(main, "_run_analysis", fake_run)

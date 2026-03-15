@@ -202,3 +202,91 @@ async def test_run_analysis_reports_effective_source_counts(monkeypatch):
     assert esc["census_tracts"] == 12, "Census tracts should reflect actual tract_count from demographics"
     assert esc["competitors_elder_care"] == 8, "Elder care competitors should reflect actual facility count"
     assert "competitors_schools" not in esc, "Schools competitor key should not appear for elder_care ministry"
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_enriches_legacy_elder_demographics_from_live(monkeypatch):
+    monkeypatch.setattr(main, "USE_DB", True)
+
+    async def fake_get_isochrone(_lat, _lon, _drive):
+        return None
+
+    async def fake_aggregate_demographics(**_kwargs):
+        return {
+            "tract_count": 12,
+            "total_population": 50000,
+            "seniors_65_plus": 3200,
+            "seniors_75_plus": 1200,
+            "seniors_living_alone": 0,
+            "seniors_below_200pct_poverty": 0,
+        }
+
+    live_calls = {"count": 0}
+
+    async def fake_live_demographics(**_kwargs):
+        live_calls["count"] += 1
+        return {
+            "tract_count": 12,
+            "total_population": 50000,
+            "seniors_65_plus": 3200,
+            "seniors_75_plus": 1200,
+            "seniors_living_alone": 640,
+            "seniors_below_200pct_poverty": 410,
+            "seniors_by_direction": {"N": {"seniors_75_plus": 300}},
+        }
+
+    async def fake_lookup_cached_isochrone(*_args, **_kwargs):
+        return None
+
+    async def fake_save_isochrone(*_args, **_kwargs):
+        return None
+
+    async def fake_data_freshness():
+        return None
+
+    def fake_benchmark(_result):
+        return None
+
+    class _Result:
+        def __init__(self):
+            self.ministry_type = None
+            self.trace_id = None
+            self.data_freshness = None
+            self.benchmark_narrative = None
+            self.recommendation = "ok"
+            self.feasibility_score = types.SimpleNamespace(overall=70)
+
+    async def fake_analyzer(**kwargs):
+        demo = kwargs["demographics"]
+        assert demo["seniors_living_alone"] == 640
+        assert demo["seniors_below_200pct_poverty"] == 410
+        assert demo.get("senior_metrics_source") == "live_enriched"
+        return _Result()
+
+    monkeypatch.setattr(main, "get_isochrone", fake_get_isochrone)
+    monkeypatch.setattr(main, "get_demographics", fake_live_demographics)
+    monkeypatch.setattr(main, "_build_data_freshness_metadata", fake_data_freshness)
+    monkeypatch.setattr(main, "_build_benchmark_narrative", fake_benchmark)
+    monkeypatch.setitem(main.MODULE_REGISTRY, "elder_care", types.SimpleNamespace(analyzer=fake_analyzer))
+
+    import db.connection
+    import db.demographics
+    import db.queries
+
+    monkeypatch.setattr(db.connection, "get_session", lambda: _DummySession())
+    monkeypatch.setattr(db.demographics, "aggregate_demographics", fake_aggregate_demographics)
+    monkeypatch.setattr(db.queries, "lookup_cached_isochrone", fake_lookup_cached_isochrone)
+    monkeypatch.setattr(db.queries, "save_isochrone", fake_save_isochrone)
+
+    request = AnalysisRequest(
+        school_name="Legacy Senior Data Test",
+        address="123 Main St",
+        ministry_type="elder_care",
+    )
+    location = {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+
+    _result, context = await main._run_analysis(location, request)
+
+    assert live_calls["count"] == 1
+    assert context["used_live_senior_enrichment"] is True
+    assert any("senior demographics incomplete" in note.lower() for note in context["fallback_notes"])
