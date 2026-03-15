@@ -126,6 +126,31 @@ export default function DemographicsPanel({ demographics: d, countyName, ministr
           </>
         ) : (
           <>
+            {ministryType === "elder_care" && (
+              <>
+                <Stat label="Seniors 65+" value={fmt(d.seniors_65_plus)} />
+                <Stat label="Seniors 75+" value={fmt(d.seniors_75_plus)} />
+                <Stat
+                  label="Seniors Living Alone"
+                  value={fmt(d.seniors_living_alone)}
+                  note={
+                    d.seniors_living_alone != null && d.seniors_65_plus
+                      ? `${Math.round((d.seniors_living_alone / d.seniors_65_plus) * 100)}% of seniors 65+`
+                      : undefined
+                  }
+                />
+                <Stat label="Seniors Below Poverty Proxy" value={fmt(d.seniors_below_200pct_poverty)} />
+                <Stat
+                  label="Weighted Competitor Beds"
+                  value={d.elder_care_weighted_competitor_beds != null ? d.elder_care_weighted_competitor_beds.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "N/A"}
+                />
+                <Stat
+                  label="Bed Saturation Ratio"
+                  value={d.elder_care_bed_saturation_ratio != null ? d.elder_care_bed_saturation_ratio.toFixed(3) : "N/A"}
+                  note="Weighted beds divided by target senior population"
+                />
+              </>
+            )}
             <Stat
               label={ministryType === "elder_care" ? "Senior-Focused Demand Signal" : isSeniorHousing ? "Senior Housing Demand" : "Housing Need Signal"}
               value={targetPopulation != null && d.total_households ? `${Math.round((targetPopulation / d.total_households) * 100)}%` : "N/A"}

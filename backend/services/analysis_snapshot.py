@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 
 from models.schemas import AnalysisRequest, AnalysisResponse
 
 
+SNAPSHOT_SCHEMA_VERSION = os.getenv("ANALYSIS_CACHE_SCHEMA_VERSION", "2026-03-senior-metrics-v2")
+
+
 def snapshot_key(request: AnalysisRequest) -> str:
-    payload = json.dumps(request.model_dump(mode="json"), sort_keys=True)
+    payload = json.dumps({
+        "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "request": request.model_dump(mode="json"),
+    }, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()[:20]
     return f"snapshot:{digest}"
 

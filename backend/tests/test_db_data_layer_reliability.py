@@ -149,6 +149,10 @@ async def test_elder_care_uses_db_first_when_rows_present(monkeypatch):
     )
 
     assert result.total_private_school_count == 1
+    assert result.demographics.seniors_75_plus == 600
+    assert result.demographics.elder_care_weighted_competitor_beds is not None
+    assert result.demographics.elder_care_bed_saturation_ratio is not None
+    assert result.feasibility_score.competition.label == "Bed Saturation"
 
 
 @pytest.mark.asyncio
