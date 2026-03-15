@@ -353,6 +353,7 @@ async def _build_data_freshness_metadata() -> DataFreshnessMetadata:
         "hud_lihtc_property": "HUD LIHTC Property",
         "hud_lihtc_tenant": "HUD LIHTC Tenant",
         "hud_qct_dda": "HUD QCT/DDA",
+        "hud_section_202": "HUD Section 202",
     }
 
     if not USE_DB:
@@ -487,7 +488,28 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
         reason_text.append("Overall confidence is low; board-ready packaging should be treated as directional.")
     result.export_readiness = ExportReadiness(ready=ready, status=status, reasons=reason_text)
 
-    missing = [row.dataset for row in result.data_dependencies if not row.available]
+    # Only report datasets relevant to this ministry type as missing
+    _MINISTRY_RELEVANT_DEPS: dict[str, set[str]] = {
+        "elder_care": {"census_tracts", "competitors_elder_care"},
+        "housing": {"census_tracts", "competitors_housing", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"},
+        "schools": {"census_tracts", "competitors_schools"},
+    }
+    relevant = _MINISTRY_RELEVANT_DEPS.get(result.ministry_type, set())
+    missing = [row.dataset for row in result.data_dependencies if not row.available and row.dataset in relevant]
+    inputs_used = ["census"] if "census_tracts" not in missing else []
+    competitor_label = {
+        "elder_care": "cms_elder_care_facilities",
+        "housing": "hud_lihtc_properties",
+        "schools": "nces_private_schools",
+    }.get(result.ministry_type, "module_competitors")
+    competitor_dep = {
+        "elder_care": "competitors_elder_care",
+        "housing": "competitors_housing",
+        "schools": "competitors_schools",
+    }.get(result.ministry_type)
+    if competitor_dep and competitor_dep not in missing:
+        inputs_used.append(competitor_label)
+
     result.section_explanations = [
         SectionExplanation(
             section="catchment",
@@ -498,7 +520,7 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
         ),
         SectionExplanation(
             section="demographics_and_competition",
-            inputs_used=["census", "module_competitors"],
+            inputs_used=inputs_used,
             inputs_missing=missing,
             fallback_used=fallback_notes,
             confidence_impact="high" if fallback_notes else "low",
@@ -994,10 +1016,17 @@ async def analyze(request: AnalysisRequest):
         )
 
     raw_result, context = await _run_analysis(location, request, run_mode=run_mode)
+
+    # Merge effective source counts (from actual analysis) with DB table counts so
+    # dependency tracking reflects reality — live API data counts as available.
+    effective_counts = dict(dependency_counts)
+    for k, v in context.get("effective_source_counts", {}).items():
+        effective_counts[k] = max(effective_counts.get(k, 0), v)
+
     result = _apply_reliability_metadata(
         raw_result,
         run_mode=run_mode,
-        dependency_counts=dependency_counts,
+        dependency_counts=effective_counts,
         fallback_notes=context.get("fallback_notes", []),
         strict_blockers=blockers,
     )
@@ -1686,7 +1715,27 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
         except Exception:
             logger.warning("Failed to persist analysis history for '%s'", request.school_name, exc_info=True)
 
-    return result, {"used_live_demographics_fallback": used_live_demographics_fallback, "fallback_notes": fallback_notes, "catchment_type": catchment_type}
+    # Track effective source counts so dependency metadata reflects actual data usage,
+    # not just DB table row counts.  When live APIs provide data, sources are available.
+    effective_source_counts: dict[str, int] = {}
+    if demographics and demographics.get("tract_count", 0) > 0:
+        effective_source_counts["census_tracts"] = demographics["tract_count"]
+    competitor_count = getattr(result, "total_private_school_count", 0) or len(getattr(result, "competitor_schools", None) or [])
+    if competitor_count > 0:
+        competitor_key = {
+            "elder_care": "competitors_elder_care",
+            "schools": "competitors_schools",
+            "housing": "competitors_housing",
+        }.get(request.ministry_type)
+        if competitor_key:
+            effective_source_counts[competitor_key] = competitor_count
+
+    return result, {
+        "used_live_demographics_fallback": used_live_demographics_fallback,
+        "fallback_notes": fallback_notes,
+        "catchment_type": catchment_type,
+        "effective_source_counts": effective_source_counts,
+    }
 
 
 async def _load_workspace(session, workspace_id: str):
