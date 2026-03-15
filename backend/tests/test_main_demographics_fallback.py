@@ -149,3 +149,56 @@ async def test_run_analysis_uses_db_demographics_when_available(monkeypatch):
     result, context = await main._run_analysis(location, request)
 
     assert result.feasibility_score.overall == 70
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_reports_effective_source_counts(monkeypatch):
+    """Verify that _run_analysis context includes effective_source_counts
+    so dependency tracking reflects actual data usage, not just DB table counts."""
+    monkeypatch.setattr(main, "USE_DB", False)
+
+    async def fake_get_isochrone(_lat, _lon, _drive):
+        return None
+
+    async def fake_live_demographics(**_kwargs):
+        return {"tract_count": 12, "total_population": 5000}
+
+    async def fake_data_freshness():
+        return None
+
+    def fake_benchmark(_result):
+        return None
+
+    class _Result:
+        def __init__(self):
+            self.ministry_type = None
+            self.trace_id = None
+            self.data_freshness = None
+            self.benchmark_narrative = None
+            self.recommendation = "ok"
+            self.feasibility_score = types.SimpleNamespace(overall=70)
+            self.total_private_school_count = 8
+            self.competitor_schools = [{"name": f"Facility {i}"} for i in range(8)]
+
+    async def fake_analyzer(**kwargs):
+        return _Result()
+
+    monkeypatch.setattr(main, "get_isochrone", fake_get_isochrone)
+    monkeypatch.setattr(main, "get_demographics", fake_live_demographics)
+    monkeypatch.setattr(main, "_build_data_freshness_metadata", fake_data_freshness)
+    monkeypatch.setattr(main, "_build_benchmark_narrative", fake_benchmark)
+    monkeypatch.setitem(main.MODULE_REGISTRY, "elder_care", types.SimpleNamespace(analyzer=fake_analyzer))
+
+    request = AnalysisRequest(
+        school_name="Source Count Test",
+        address="123 Main St",
+        ministry_type="elder_care",
+    )
+    location = {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+
+    result, context = await main._run_analysis(location, request)
+
+    esc = context["effective_source_counts"]
+    assert esc["census_tracts"] == 12, "Census tracts should reflect actual tract_count from demographics"
+    assert esc["competitors_elder_care"] == 8, "Elder care competitors should reflect actual facility count"
+    assert "competitors_schools" not in esc, "Schools competitor key should not appear for elder_care ministry"

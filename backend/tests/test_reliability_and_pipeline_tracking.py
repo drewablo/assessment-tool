@@ -80,6 +80,7 @@ def test_apply_reliability_metadata_builds_typed_nested_models():
     result = types.SimpleNamespace(
         catchment_type="radius",
         catchment_mode="radius",
+        ministry_type="schools",
         demographics=types.SimpleNamespace(data_confidence="medium"),
         feasibility_score=types.SimpleNamespace(stage2=types.SimpleNamespace(readiness="ready")),
         outcome="success",
@@ -99,3 +100,37 @@ def test_apply_reliability_metadata_builds_typed_nested_models():
     assert updated.section_explanations
     assert all(isinstance(row, SectionExplanation) for row in updated.section_explanations)
     assert all(isinstance(row, DataDependencyStatus) for row in updated.data_dependencies)
+
+
+def test_section_explanations_filters_missing_by_ministry_type():
+    """inputs_missing should only include datasets relevant to the ministry type."""
+    # Elder care analysis — only census_tracts and competitors_elder_care are relevant
+    result = types.SimpleNamespace(
+        catchment_type="radius",
+        catchment_mode="radius",
+        ministry_type="elder_care",
+        demographics=types.SimpleNamespace(data_confidence="medium"),
+        feasibility_score=types.SimpleNamespace(stage2=types.SimpleNamespace(readiness="ready")),
+        outcome="success",
+    )
+
+    updated = main._apply_reliability_metadata(
+        result,
+        run_mode="db_with_fallback",
+        dependency_counts={"census_tracts": 50, "competitors_elder_care": 15},
+        fallback_notes=[],
+        strict_blockers=[],
+    )
+
+    demo_section = [s for s in updated.section_explanations if s.section == "demographics_and_competition"][0]
+    # Census and elder care competitors are available, so nothing should be missing
+    assert demo_section.inputs_missing == [], (
+        f"Elder care with census+competitors available should have no missing inputs, got: {demo_section.inputs_missing}"
+    )
+    # Schools/housing datasets should NOT appear even though they have 0 rows
+    assert "competitors_schools" not in demo_section.inputs_missing
+    assert "hud_lihtc_property" not in demo_section.inputs_missing
+
+    # Census and competitors should show in inputs_used
+    assert "census" in demo_section.inputs_used
+    assert "cms_elder_care_facilities" in demo_section.inputs_used
