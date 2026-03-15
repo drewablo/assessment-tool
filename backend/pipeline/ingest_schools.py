@@ -25,9 +25,11 @@ logger = logging.getLogger("pipeline.schools")
 
 PSS_URL = "https://nces.ed.gov/surveys/pss/zip/pss2122_pu_csv.zip"
 
-# Religious affiliation codes (from NCES PSS codebook)
-CATHOLIC_CODES = {21, 22, 24, 25, 26, 27, 28, 29, 30}  # Roman Catholic, diocesan, parish, etc.
-RELIGIOUS_CODES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
+# Religious affiliation codes (ORIENT column, from NCES PSS codebook)
+# ORIENT code 1 = Roman Catholic; 30 = Nonsectarian; 2-29,31-33 = other religious
+CATHOLIC_CODES = {1}
+RELIGIOUS_CODES = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                   21, 22, 23, 24, 25, 26, 27, 28, 29, 31, 32, 33}
 
 # Special education exclusion keywords
 SPECIAL_ED_KEYWORDS = [
@@ -43,10 +45,11 @@ EXCLUDED_SCHOOLS = {
 }
 
 # Coeducation code mapping (P335)
+# 1=Yes (co-ed), 2=All-female, 3=All-male
 COED_MAP = {
     1: "Co-ed",
-    2: "All Boys",
-    3: "All Girls",
+    2: "All Girls",
+    3: "All Boys",
 }
 
 # Grade level mapping (GRADE2)
@@ -163,7 +166,7 @@ def _transform_schools(df: pd.DataFrame) -> list[dict]:
             continue
 
         affiliation_code = None
-        raw_aff = row.get("P320")
+        raw_aff = row.get("ORIENT")
         if pd.notna(raw_aff):
             try:
                 affiliation_code = int(raw_aff)
