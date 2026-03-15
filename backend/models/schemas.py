@@ -244,6 +244,8 @@ class DemographicData(BaseModel):
     seniors_below_200pct_poverty: Optional[int] = None
     seniors_projected_5yr: Optional[int] = None
     seniors_projected_10yr: Optional[int] = None
+    elder_care_weighted_competitor_beds: Optional[float] = None
+    elder_care_bed_saturation_ratio: Optional[float] = None
     # Housing-specific demographic detail
     cost_burdened_renter_households: Optional[int] = None
     renter_households: Optional[int] = None

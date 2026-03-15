@@ -233,8 +233,13 @@ export interface DemographicData {
   qct_designated_projects?: number | null;
   dda_designated_projects?: number | null;
   seniors_65_plus?: number | null;
+  seniors_75_plus?: number | null;
+  seniors_living_alone?: number | null;
+  seniors_below_200pct_poverty?: number | null;
   seniors_projected_5yr?: number | null;
   seniors_projected_10yr?: number | null;
+  elder_care_weighted_competitor_beds?: number | null;
+  elder_care_bed_saturation_ratio?: number | null;
 }
 
 export interface CompetitorSchool {
