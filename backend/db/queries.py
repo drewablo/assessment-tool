@@ -32,6 +32,12 @@ from db.models import (
 DEGREES_PER_MILE = 1.0 / 69.0
 METERS_PER_MILE = 1609.34
 
+GRADE_LEVEL_FILTER = {
+    "k5": {"K-Terminal", "Elementary/Middle", "Combined/Other"},
+    "k8": {"K-Terminal", "Elementary/Middle", "Combined/Other"},
+    "high_school": {"Secondary/High", "Combined/Other"},
+}
+
 _GEOGRAPHY = Geography(srid=4326)
 
 
@@ -249,6 +255,7 @@ async def get_nearby_schools(
     lon: float,
     radius_miles: float,
     isochrone_geojson: Optional[dict] = None,
+    grade_level: Optional[str] = None,
     limit: int = 25,
 ) -> list[CompetitorSchoolRecord]:
     """Get private schools within catchment, ordered by distance."""
@@ -271,9 +278,14 @@ async def get_nearby_schools(
         _geo(point),
     ) / METERS_PER_MILE
 
+    conditions = [spatial_filter]
+    allowed_grades = GRADE_LEVEL_FILTER.get(grade_level or "")
+    if allowed_grades is not None:
+        conditions.append(CompetitorSchoolRecord.grade_level.in_(allowed_grades))
+
     stmt = (
         select(CompetitorSchoolRecord, distance_expr.label("distance_miles"))
-        .where(spatial_filter)
+        .where(and_(*conditions))
         .order_by(distance_expr)
         .limit(limit)
     )

@@ -54,10 +54,10 @@ COED_MAP = {
 
 # Grade level mapping (GRADE2)
 GRADE_LEVEL_MAP = {
-    1: "Elementary",
-    2: "Middle School",
-    3: "High School",
-    4: "K-12",
+    0: "K-Terminal",
+    1: "Elementary/Middle",
+    2: "Secondary/High",
+    3: "Combined/Other",
 }
 
 
