@@ -119,7 +119,7 @@ _RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16, 32
 _ACS_BATCH_SIZE = 48  # Census API max is 50 vars; keep room for NAME + geo columns
 
 
-def _chunk_acs_variables(variables: list[str], batch_size: int = _ACS_BATCH_SIZE) -> list[list[str]]:
+def _chunk_variables(variables: list[str], batch_size: int = _ACS_BATCH_SIZE) -> list[list[str]]:
     """Split ACS variable IDs into NAME-prefixed request batches under API limits."""
     vars_without_name = [v for v in variables if v != "NAME"]
     batches: list[list[str]] = []
@@ -349,7 +349,7 @@ async def _fetch_acs_state(
     Raises on failure so the caller can distinguish "no data" from "API error".
     """
     url = f"{CENSUS_API_BASE}/{vintage}/acs/acs5"
-    batches = _chunk_acs_variables(list(ACS_VARIABLES.keys()))
+    batches = _chunk_variables(list(ACS_VARIABLES.keys()))
     logger.info(
         "ACS state=%s variable batching: batches=%d sizes=%s",
         state_fips,
