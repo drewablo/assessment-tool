@@ -116,6 +116,16 @@ TIGER_SHAPEFILE_VINTAGE = os.getenv("TIGER_VINTAGE", "2022")
 # Retry settings for Census API and TIGER downloads
 _MAX_RETRIES = 4
 _RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16, 32
+_ACS_BATCH_SIZE = 48  # Census API max is 50 vars; keep room for NAME + geo columns
+
+
+def _chunk_acs_variables(variables: list[str], batch_size: int = _ACS_BATCH_SIZE) -> list[list[str]]:
+    """Split ACS variable IDs into NAME-prefixed request batches under API limits."""
+    vars_without_name = [v for v in variables if v != "NAME"]
+    batches: list[list[str]] = []
+    for i in range(0, len(vars_without_name), batch_size):
+        batches.append(["NAME", *vars_without_name[i : i + batch_size]])
+    return batches if batches else [["NAME"]]
 
 
 async def _retry_get_json(client: httpx.AsyncClient, url: str, *, params: dict, timeout: float, label: str) -> dict | list:
@@ -338,33 +348,61 @@ async def _fetch_acs_state(
 
     Raises on failure so the caller can distinguish "no data" from "API error".
     """
-    var_list = ",".join(ACS_VARIABLES.keys())
-    params = {
-        "get": f"NAME,{var_list}",
-        "for": "tract:*",
-        "in": f"state:{state_fips}",
-    }
-    if CENSUS_API_KEY:
-        params["key"] = CENSUS_API_KEY
-
     url = f"{CENSUS_API_BASE}/{vintage}/acs/acs5"
-
-    data = await _retry_get_json(
-        client, url,
-        params=params, timeout=90.0,
-        label=f"ACS state={state_fips}",
+    batches = _chunk_acs_variables(list(ACS_VARIABLES.keys()))
+    logger.info(
+        "ACS state=%s variable batching: batches=%d sizes=%s",
+        state_fips,
+        len(batches),
+        [len(batch) for batch in batches],
     )
 
-    if not data or len(data) < 2:
-        logger.warning("ACS state=%s returned empty/header-only response", state_fips)
+    merged_rows: dict[str, dict] = {}
+
+    for idx, batch in enumerate(batches, start=1):
+        params = {
+            "get": ",".join(batch),
+            "for": "tract:*",
+            "in": f"state:{state_fips}",
+        }
+        if CENSUS_API_KEY:
+            params["key"] = CENSUS_API_KEY
+
+        data = await _retry_get_json(
+            client,
+            url,
+            params=params,
+            timeout=90.0,
+            label=f"ACS state={state_fips} batch={idx}/{len(batches)}",
+        )
+
+        if not data or len(data) < 2:
+            logger.warning(
+                "ACS state=%s batch=%d/%d returned empty/header-only response",
+                state_fips,
+                idx,
+                len(batches),
+            )
+            continue
+
+        headers = data[0]
+        for record in data[1:]:
+            row = dict(zip(headers, record))
+            tract = str(row.get("tract", "")).zfill(6)
+            county = str(row.get("county", "")).zfill(3)
+            state = str(row.get("state", state_fips)).zfill(2)
+            geoid = f"{state}{county}{tract}"
+
+            if geoid not in merged_rows:
+                merged_rows[geoid] = row
+            else:
+                merged_rows[geoid].update(row)
+
+    if not merged_rows:
+        logger.warning("ACS state=%s returned empty/header-only response across all batches", state_fips)
         return []
 
-    headers = data[0]
-    rows = []
-    for record in data[1:]:
-        row = dict(zip(headers, record))
-        rows.append(row)
-    return rows
+    return list(merged_rows.values())
 
 
 def _transform_tract(row: dict, vintage: str = "2022") -> dict:
