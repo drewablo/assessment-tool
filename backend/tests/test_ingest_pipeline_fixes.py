@@ -105,3 +105,45 @@ def test_census_transform_populates_senior_support_fields():
 
     assert transformed["seniors_below_poverty"] == 30
     assert transformed["seniors_living_alone"] == 31
+
+
+def test_census_fetch_batches_and_merges_rows(monkeypatch, caplog):
+    captured_get_params = []
+
+    monkeypatch.setattr(
+        ingest_census,
+        "ACS_VARIABLES",
+        {f"VAR_{i:03d}": f"mapped_{i:03d}" for i in range(57)},
+    )
+
+    async def _fake_retry_get_json(client, url, *, params, timeout, label):
+        captured_get_params.append(params["get"].split(","))
+        batch_vars = [v for v in params["get"].split(",") if v != "NAME"]
+        header = ["NAME", *batch_vars, "state", "county", "tract"]
+        return [
+            header,
+            [
+                "Census Tract 1",
+                *["1" for _ in batch_vars],
+                "42",
+                "101",
+                "012300",
+            ],
+        ]
+
+    monkeypatch.setattr(ingest_census, "_retry_get_json", _fake_retry_get_json)
+
+    caplog.set_level("INFO", logger="pipeline.census")
+    rows = asyncio.run(ingest_census._fetch_acs_state(client=None, state_fips="42"))
+
+    assert len(rows) == 1
+    assert len(captured_get_params) == 2
+    assert [len(batch) for batch in captured_get_params] == [49, 10]
+    assert "variable batching: batches=2 sizes=[49, 10]" in caplog.text
+
+    row = rows[0]
+    assert row["state"] == "42"
+    assert row["county"] == "101"
+    assert row["tract"] == "012300"
+    assert all(row[f"VAR_{i:03d}"] == "1" for i in range(57))
+
