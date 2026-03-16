@@ -2,6 +2,9 @@
 
 import asyncio
 import collections
+import csv
+import hashlib
+import io
 import logging
 import os
 import re
@@ -32,6 +35,7 @@ CMS_PROVIDER_ID_KEYS = [
 ]
 CMS_NAME_KEYS = ["provider_name", "facility_name", "provname"]
 CMS_LOCATION_STRING_KEYS = ["location", "geolocation", "LOCATION"]
+ONEFACT_AL_CSV_URL = "https://github.com/onefact/assisted-living/raw/main/assisted-living-facilities.csv"
 
 
 def _cms_base_url() -> str:
@@ -85,6 +89,19 @@ async def _fetch_all_cms() -> list[dict]:
             break
     logger.info("Fetched %s CMS facilities total", len(all_facilities))
     return all_facilities
+
+
+async def _fetch_onefact_assisted_living_rows() -> list[dict]:
+    """Fetch OneFact assisted-living facilities as CSV rows."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(ONEFACT_AL_CSV_URL, follow_redirects=True, timeout=90.0)
+        resp.raise_for_status()
+
+    text = resp.text
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    logger.info("Fetched %s OneFact assisted-living rows", len(rows))
+    return rows
 
 
 
@@ -180,6 +197,56 @@ def _transform_facility(raw: dict) -> dict | None:
     }
 
 
+def _transform_onefact_facility(raw: dict) -> dict | None:
+    name = str(raw.get("Facility Name") or raw.get("facility_name") or raw.get("name") or "").strip()
+    if not name:
+        return None
+
+    lat_raw = raw.get("Latitude") or raw.get("latitude") or raw.get("lat")
+    lon_raw = raw.get("Longitude") or raw.get("longitude") or raw.get("lon")
+    if lat_raw in (None, "") or lon_raw in (None, ""):
+        return None
+    try:
+        lat = float(lat_raw)
+        lon = float(lon_raw)
+    except (TypeError, ValueError):
+        return None
+    if lat == 0 or lon == 0:
+        return None
+
+    beds = None
+    raw_beds = raw.get("Capacity") or raw.get("capacity") or raw.get("licensed_beds") or raw.get("beds")
+    if raw_beds not in (None, ""):
+        try:
+            beds = int(float(raw_beds))
+        except (TypeError, ValueError):
+            beds = None
+
+    city = str(raw.get("City") or raw.get("city") or "").strip() or None
+    state = str(raw.get("State") or raw.get("state") or "").strip() or None
+    ownership_type = str(raw.get("Ownership Type") or raw.get("ownership_type") or raw.get("ownership") or "").strip() or None
+
+    stable_key = f"{name.lower()}|{lat:.6f}|{lon:.6f}"
+    provider_id = f"onefact_{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:22]}"
+
+    return {
+        "provider_id": provider_id,
+        "facility_name": name,
+        "lat": lat,
+        "lon": lon,
+        "city": city,
+        "state": state,
+        "county_fips": None,
+        "care_level": "assisted_living",
+        "certified_beds": beds,
+        "average_daily_census": None,
+        "occupancy_pct": None,
+        "ownership_type": ownership_type,
+        "overall_rating": None,
+        "data_source": "onefact",
+    }
+
+
 @celery_app.task(name="pipeline.ingest_elder_care.ingest_cms_data", bind=True)
 def ingest_cms_data(self):
     loop = asyncio.new_event_loop()
@@ -258,9 +325,23 @@ async def _ingest_cms_async():
     try:
         _log_cms_endpoint_diagnostics()
         raw_facilities = await _fetch_all_cms()
-        records = [t for row in raw_facilities if (t := _transform_facility(row))]
-        _summarize_transform_diagnostics(raw_facilities, records)
-        logger.info("Transformed %s elder care records", len(records))
+        cms_records = [t for row in raw_facilities if (t := _transform_facility(row))]
+        _summarize_transform_diagnostics(raw_facilities, cms_records)
+
+        onefact_records: list[dict] = []
+        try:
+            raw_onefact_rows = await _fetch_onefact_assisted_living_rows()
+            onefact_records = [t for row in raw_onefact_rows if (t := _transform_onefact_facility(row))]
+        except Exception as e:
+            logger.warning("OneFact assisted-living fetch/transform failed; proceeding with CMS-only ingest: %s", e)
+
+        records = cms_records + onefact_records
+        logger.info(
+            "Transformed elder care records total=%s cms=%s onefact_assisted_living=%s",
+            len(records),
+            len(cms_records),
+            len(onefact_records),
+        )
 
         batch_size = 500
         total_upserted = 0
