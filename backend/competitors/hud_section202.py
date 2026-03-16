@@ -54,8 +54,8 @@ def get_nearby_section202_projects(lat: float, lon: float, radius_miles: float) 
     if not lat_col or not lon_col:
         return []
 
-    # Prefer HUD's visual site-name field first; this is the canonical property
-    # label for Section 202 records. Fall back to property/name only when needed.
+    # Prefer SERVICING_SITE_NAME_TEXT — the canonical display name for Section 202.
+    # Explicitly avoid HUB_NAME which is a regional HUD office label, not a property name.
     servicing_name_col = _pick_column(
         df,
         [
@@ -66,7 +66,12 @@ def get_nearby_section202_projects(lat: float, lon: float, radius_miles: float) 
         ],
     )
     property_name_col = _pick_column(df, ["property_name", "PROPERTY_NAME_TEXT", "property_name_text"])
+    # Exclude hub_name from generic fallback — it contains useless regional office labels
+    hub_name_col = _pick_column(df, ["hub_name", "HUB_NAME"])
     name_col = _pick_column(df, ["name", "project_name"])
+    # If the "name" column is actually the hub_name column, skip it
+    if name_col and hub_name_col and name_col == hub_name_col:
+        name_col = None
     city_col = _pick_column(df, ["city", "std_city"])
     state_col = _pick_column(df, ["state", "std_st"])
     address_col = _pick_column(df, ["street_address", "std_addr"])
