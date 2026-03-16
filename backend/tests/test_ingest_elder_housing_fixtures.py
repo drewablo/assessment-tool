@@ -90,6 +90,51 @@ def test_elder_rejection_reasons_not_all_rows_dropped():
     assert reasons.count(None) == 1
 
 
+def test_onefact_fetch_reads_csv_rows(monkeypatch):
+    class _Resp:
+        text = "Facility Name,Latitude,Longitude,City,State,Capacity\nAlpha AL,41.9,-87.6,Chicago,IL,120\n"
+
+        def raise_for_status(self):
+            return None
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, follow_redirects=None, timeout=None):
+            assert "assisted-living-facilities.csv" in url
+            return _Resp()
+
+    monkeypatch.setattr(ingest_elder_care.httpx, "AsyncClient", _Client)
+    rows = asyncio.run(ingest_elder_care._fetch_onefact_assisted_living_rows())
+    assert len(rows) == 1
+    assert rows[0]["Facility Name"] == "Alpha AL"
+
+
+def test_onefact_transform_maps_assisted_living_fields():
+    raw = {
+        "Facility Name": "Alpha AL",
+        "Latitude": "41.9001",
+        "Longitude": "-87.6502",
+        "City": "Chicago",
+        "State": "IL",
+        "Capacity": "110",
+        "Ownership Type": "For Profit",
+    }
+
+    transformed = ingest_elder_care._transform_onefact_facility(raw)
+    assert transformed is not None
+    assert transformed["facility_name"] == "Alpha AL"
+    assert transformed["care_level"] == "assisted_living"
+    assert transformed["data_source"] == "onefact"
+    assert transformed["certified_beds"] == 110
+    assert transformed["overall_rating"] is None
+    assert transformed["provider_id"].startswith("onefact_")
+
+
 
 
 def test_property_transform_accepts_lihtcpub_style_headers():
