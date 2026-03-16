@@ -54,7 +54,19 @@ def get_nearby_section202_projects(lat: float, lon: float, radius_miles: float) 
     if not lat_col or not lon_col:
         return []
 
-    name_col = _pick_column(df, ["servicing_site_name", "property_name", "name"])
+    # Prefer HUD's visual site-name field first; this is the canonical property
+    # label for Section 202 records. Fall back to property/name only when needed.
+    servicing_name_col = _pick_column(
+        df,
+        [
+            "servicing_site_name",
+            "SERVICING_SITE_NAME_TEXT",
+            "servicing_site_name_text",
+            "site_name",
+        ],
+    )
+    property_name_col = _pick_column(df, ["property_name", "PROPERTY_NAME_TEXT", "property_name_text"])
+    name_col = _pick_column(df, ["name", "project_name"])
     city_col = _pick_column(df, ["city", "std_city"])
     state_col = _pick_column(df, ["state", "std_st"])
     address_col = _pick_column(df, ["street_address", "std_addr"])
@@ -100,9 +112,15 @@ def get_nearby_section202_projects(lat: float, lon: float, radius_miles: float) 
 
     records: list[dict] = []
     for _, r in df.iterrows():
+        display_name = (
+            _safe_str(r.get(servicing_name_col) if servicing_name_col else None)
+            or _safe_str(r.get(property_name_col) if property_name_col else None)
+            or _safe_str(r.get(name_col) if name_col else None)
+            or "HUD Section 202 Property"
+        )
         records.append(
             {
-                "name": _safe_str(r.get(name_col) if name_col else None) or "HUD Section 202 Property",
+                "name": display_name,
                 "lat": float(r["lat"]),
                 "lon": float(r["lon"]),
                 "distance_miles": round(float(r["distance_miles"]), 2),
