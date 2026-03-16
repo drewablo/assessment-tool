@@ -145,6 +145,53 @@ async def test_housing_notes_reflect_selected_type(monkeypatch):
     assert any("serving all age groups" in note for note in all_ages_result.data_notes)
 
 
+
+@pytest.mark.asyncio
+async def test_housing_senior_only_handles_section202_loader_failure(monkeypatch):
+    async def _empty_s202(*, lat, lon, radius_miles):
+        return []
+
+    monkeypatch.setattr(housing, "USE_DB", True)
+    monkeypatch.setattr(housing, "_get_nearby_housing_db", _fake_projects)
+    monkeypatch.setattr(housing, "_get_nearby_section_202_db", _empty_s202)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("bad CSV")
+
+    monkeypatch.setattr(housing, "get_nearby_section202_projects", _boom)
+    monkeypatch.setattr(housing, "compute_module_benchmarks", _fake_benchmarks)
+    monkeypatch.setattr(housing, "build_generic_hierarchical", lambda **kwargs: None)
+
+    request = types.SimpleNamespace(
+        school_name="Senior",
+        gender="coed",
+        grade_level="k12",
+        weighting_profile="standard_baseline",
+        stage2_inputs=None,
+        housing_target_population="senior_only",
+    )
+
+    result = await housing.analyze_housing(
+        location={"lat": 41.0, "lon": -87.0, "matched_address": "A", "state_name": "IL", "state_fips": "17"},
+        demographics={
+            "cost_burdened_renter_households": 850,
+            "renter_households": 2400,
+            "median_household_income": 50000,
+            "total_households": 3000,
+            "total_population": 9000,
+            "seniors_65_plus": 12000,
+        },
+        request=request,
+        radius_miles=10,
+        drive_minutes=20,
+        isochrone_polygon=None,
+        catchment_type="radius",
+    )
+
+    assert result.demographics.total_population == 9000
+    assert len(result.competitor_schools) >= 1
+
+
 def test_non_housing_modules_unaffected_by_field():
     schools = AnalysisRequest(
         school_name="School",

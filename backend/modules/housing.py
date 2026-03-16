@@ -451,9 +451,13 @@ async def analyze_housing(
                 logger.warning("HUD Section 202 DB query failed (non-blocking): %s", exc)
 
         if not section_202_projects:
-            section_202_projects = get_nearby_section202_projects(
-                location["lat"], location["lon"], radius_miles,
-            )
+            try:
+                section_202_projects = get_nearby_section202_projects(
+                    location["lat"], location["lon"], radius_miles,
+                )
+            except Exception as exc:
+                logger.warning("HUD Section 202 CSV fallback failed (non-blocking): %s", exc)
+                section_202_projects = []
 
         if section_202_projects:
             logger.info(
