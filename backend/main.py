@@ -1238,6 +1238,19 @@ async def pipeline_status():
         PipelineRun,
     )
 
+    legacy_count_notes = {
+        "housing_projects": {
+            "status": "legacy",
+            "table": "competitors_housing",
+            "note": "Legacy compatibility count only; current HUD ingest writes hud_lihtc_property/hud_lihtc_tenant instead.",
+        },
+        "hud_raw_snapshots": {
+            "status": "legacy_optional",
+            "table": "hud_raw_snapshots",
+            "note": "Populated only by ingest-hud-foundation; standard HUD pipelines do not write this table.",
+        },
+    }
+
     async with async_session_factory() as session:
         counts = {}
         for model, label in [
@@ -1317,8 +1330,12 @@ async def pipeline_status():
 
     diagnostics, db_ready_for_analysis, readiness_status = _build_pipeline_diagnostics(counts, pipelines)
 
+    active_record_counts = {k: v for k, v in counts.items() if k not in legacy_count_notes}
+
     return {
         "record_counts": counts,
+        "active_record_counts": active_record_counts,
+        "record_count_notes": legacy_count_notes,
         "pipelines": pipelines,
         "stale_pipelines": stale_pipelines,
         "retry_recommended": len(stale_pipelines) > 0,
