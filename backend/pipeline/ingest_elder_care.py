@@ -343,6 +343,17 @@ async def _ingest_cms_async():
             len(onefact_records),
         )
 
+        seen = {}
+        for rec in records:
+            seen[rec["provider_id"]] = rec
+        deduped = list(seen.values())
+        if len(deduped) < len(records):
+            logger.info(
+                "Deduped elder care records: %s duplicates removed",
+                len(records) - len(deduped),
+            )
+        records = deduped
+
         batch_size = 500
         total_upserted = 0
         for i in range(0, len(records), batch_size):
