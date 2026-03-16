@@ -54,6 +54,7 @@ async def _get_nearby_schools_db(
     lon: float,
     radius_miles: float,
     isochrone_polygon: dict | None,
+    grade_level: str,
 ) -> List[dict]:
     from db.connection import get_session
     from db.queries import get_nearby_schools as get_nearby_schools_query
@@ -65,6 +66,7 @@ async def _get_nearby_schools_db(
             lon=lon,
             radius_miles=radius_miles,
             isochrone_geojson=isochrone_polygon,
+            grade_level=grade_level,
             limit=50,
         )
 
@@ -106,6 +108,7 @@ async def analyze_schools(
             lon=location["lon"],
             radius_miles=radius_miles,
             isochrone_polygon=isochrone_polygon,
+            grade_level=request.grade_level,
         )
         # DB mode can be enabled before NCES pipeline data is loaded.
         # Fall back to live provider so analysis still has competitor context.
