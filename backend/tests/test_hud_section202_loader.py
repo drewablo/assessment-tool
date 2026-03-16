@@ -11,14 +11,15 @@ def _reset_cache():
     hud_section202._S202_CACHE_SIG = None
 
 
-def test_loader_prefers_servicing_site_name_text_over_name(tmp_path, monkeypatch):
+def test_loader_prefers_property_name_over_servicing_site_name(tmp_path, monkeypatch):
     csv_path = tmp_path / "hud_section_202_properties.csv"
     pd.DataFrame(
         [
             {
                 "lat": 41.88,
                 "lon": -87.63,
-                "SERVICING_SITE_NAME_TEXT": "St. Anne Senior Residences",
+                "property_name": "St. Anne Senior Residences",
+                "SERVICING_SITE_NAME_TEXT": "St. Anne Servicing Office",
                 "name": "Chicago Hub",
             }
         ]
@@ -33,7 +34,7 @@ def test_loader_prefers_servicing_site_name_text_over_name(tmp_path, monkeypatch
     assert rows[0]["name"] == "St. Anne Senior Residences"
 
 
-def test_loader_falls_back_when_servicing_name_missing(tmp_path, monkeypatch):
+def test_loader_falls_back_to_servicing_name_when_property_name_missing(tmp_path, monkeypatch):
     csv_path = tmp_path / "hud_section_202_properties.csv"
     pd.DataFrame(
         [

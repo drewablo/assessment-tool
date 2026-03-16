@@ -118,8 +118,8 @@ def get_nearby_section202_projects(lat: float, lon: float, radius_miles: float) 
     records: list[dict] = []
     for _, r in df.iterrows():
         display_name = (
-            _safe_str(r.get(servicing_name_col) if servicing_name_col else None)
-            or _safe_str(r.get(property_name_col) if property_name_col else None)
+            _safe_str(r.get(property_name_col) if property_name_col else None)
+            or _safe_str(r.get(servicing_name_col) if servicing_name_col else None)
             or _safe_str(r.get(name_col) if name_col else None)
             or "HUD Section 202 Property"
         )

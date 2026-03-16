@@ -378,7 +378,7 @@ async def _get_nearby_section_202_db(*, lat: float, lon: float, radius_miles: fl
     for prop, distance in rows:
         mapped.append(
             {
-                "name": prop.servicing_site_name,
+                "name": prop.property_name or prop.servicing_site_name,
                 "lat": prop.lat,
                 "lon": prop.lon,
                 "distance_miles": round(float(distance), 2),

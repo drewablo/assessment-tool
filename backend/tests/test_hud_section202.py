@@ -63,7 +63,7 @@ def test_transform_feature_basic():
     result = _transform_feature(feature)
     assert result is not None
     assert result["property_id"] == "12345"
-    assert result["servicing_site_name"] == "Test Senior Residence"
+    assert result["servicing_site_name"] == "Alt Name"
     assert result["property_name"] == "Alt Name"
     assert result["street_address"] == "100 Main St"
     assert result["city"] == "Chicago"
@@ -84,6 +84,7 @@ def test_transform_feature_basic():
 def test_transform_feature_missing_name_rejected():
     feature = _make_feature()
     feature["properties"]["SERVICING_SITE_NAME_TEXT"] = None
+    feature["properties"]["PROPERTY_NAME_TEXT"] = None
     assert _transform_feature(feature) is None
 
 
@@ -117,7 +118,8 @@ def test_transform_feature_no_id_at_all():
 def test_rejection_reason_missing_name():
     feature = _make_feature()
     feature["properties"]["SERVICING_SITE_NAME_TEXT"] = ""
-    assert _rejection_reason(feature) == "missing_site_name"
+    feature["properties"]["PROPERTY_NAME_TEXT"] = ""
+    assert _rejection_reason(feature) == "missing_property_name"
 
 
 def test_rejection_reason_missing_coordinates():
