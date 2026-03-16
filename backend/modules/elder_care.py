@@ -229,7 +229,7 @@ async def _get_nearby_elder_care_db(*, lat: float, lon: float, radius_miles: flo
                 "care_level": facility.care_level or "snf",
                 "certified_beds": facility.certified_beds,
                 "occupancy_pct": facility.occupancy_pct,
-                "overall_rating": facility.overall_rating,
+                "mds_overall_rating": facility.overall_rating,
                 "ownership": facility.ownership_type,
                 "owner_name": facility.ownership_type,
                 "city": facility.city,
