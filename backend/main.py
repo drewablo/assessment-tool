@@ -963,7 +963,11 @@ async def analyze(request: AnalysisRequest):
     run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
     dependency_health = await _collect_db_data_health() if USE_DB else {}
     dependency_counts = dependency_health.get("counts", {}) if isinstance(dependency_health, dict) else {}
-    blockers = strict_mode_blockers(dependency_counts) if run_mode == "db_strict" else []
+    blockers = strict_mode_blockers(
+        dependency_counts,
+        ministry_type=request.ministry_type,
+        housing_target_population=getattr(request, "housing_target_population", "all_ages"),
+    ) if run_mode == "db_strict" else []
     if blockers:
         raise HTTPException(
             status_code=503,

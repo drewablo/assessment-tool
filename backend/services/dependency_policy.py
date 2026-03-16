@@ -58,10 +58,31 @@ def summarize_dependencies(counts: dict[str, int] | None) -> list["DataDependenc
     return rows
 
 
-def strict_mode_blockers(counts: dict[str, int] | None) -> list[str]:
+def strict_mode_blockers(
+    counts: dict[str, int] | None,
+    *,
+    ministry_type: str | None = None,
+    housing_target_population: str | None = None,
+) -> list[str]:
+    """Return strict-mode blockers, optionally scoped to the active request.
+
+    `hud_section_202` is only a hard blocker for senior-only housing analyses.
+    For other ministries (or all-ages housing), missing Section 202 data should
+    not block the analysis request.
+    """
     counts = counts or {}
     blockers: list[str] = []
+
     for key, rule in DEPENDENCY_REGISTRY.items():
-        if rule.required and int(counts.get(key) or 0) == 0:
+        if not rule.required:
+            continue
+
+        if key == "hud_section_202":
+            is_senior_housing = ministry_type == "housing" and (housing_target_population or "all_ages") == "senior_only"
+            if not is_senior_housing:
+                continue
+
+        if int(counts.get(key) or 0) == 0:
             blockers.append(f"Required dataset '{key}' is unavailable in db_strict mode.")
+
     return blockers
