@@ -64,6 +64,12 @@ ACS_VARIABLES = {
     # Housing tenure (B25003)
     "B25003_002E": "owner_occupied",
     "B25003_003E": "renter_occupied",
+    # Housing cost burden (B25070) — renter households by gross rent as % of income
+    "B25070_001E": "renter_households_b25070",
+    "B25070_007E": "rent_30_35_pct",
+    "B25070_008E": "rent_35_40_pct",
+    "B25070_009E": "rent_40_50_pct",
+    "B25070_010E": "rent_50_plus_pct",
     # Poverty (B17001)
     "B17001_002E": "population_below_poverty",
     "B17001_015E": "male_65_74_below_poverty",
@@ -432,6 +438,13 @@ def _transform_tract(row: dict, vintage: str = "2022") -> dict:
         "families_with_own_children": families_with_children,
         "owner_occupied": _safe_int(mapped.get("owner_occupied")),
         "renter_occupied": _safe_int(mapped.get("renter_occupied")),
+        "renter_households_b25070": _safe_int(mapped.get("renter_households_b25070")),
+        "cost_burdened_renter_households": (
+            (_safe_int(mapped.get("rent_30_35_pct")) or 0)
+            + (_safe_int(mapped.get("rent_35_40_pct")) or 0)
+            + (_safe_int(mapped.get("rent_40_50_pct")) or 0)
+            + (_safe_int(mapped.get("rent_50_plus_pct")) or 0)
+        ) or None,
         "population_below_poverty": _safe_int(mapped.get("population_below_poverty")),
         "seniors_below_poverty": seniors_below_poverty,
         "seniors_living_alone": seniors_living_alone,

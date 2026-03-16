@@ -83,6 +83,8 @@ class CensusTract(Base):
 
     # --- Housing burden (B25070) ---
     renters_cost_burdened_30_plus_pct: Mapped[float | None] = mapped_column(Float)
+    renter_households_b25070: Mapped[int | None] = mapped_column(Integer)  # B25070_001E total renter HH (rent as % income)
+    cost_burdened_renter_households: Mapped[int | None] = mapped_column(Integer)  # B25070_007E-010E: rent ≥30% of income
 
     # --- Poverty (B17001) ---
     population_below_poverty: Mapped[int | None] = mapped_column(Integer)

@@ -156,7 +156,7 @@ def _rejection_reason(feature: dict) -> str | None:
     if not property_id:
         return "missing_property_id"
 
-    name = _to_str(props.get("SERVICING_SITE_NAME_TEXT"))
+    name = _to_str(props.get("SERVICING_SITE_NAME_TEXT")) or _to_str(props.get("PROPERTY_NAME_TEXT"))
     if not name:
         return "missing_site_name"
 
@@ -187,7 +187,12 @@ def _transform_feature(feature: dict) -> dict | None:
     if not property_id:
         return None
 
+    # Use SERVICING_SITE_NAME_TEXT as the canonical display name.
+    # Do NOT use HUB_NAME — it contains regional office labels, not property names.
     name = _to_str(props.get("SERVICING_SITE_NAME_TEXT"), 300)
+    if not name:
+        # Fall back to PROPERTY_NAME_TEXT if SERVICING_SITE_NAME_TEXT is absent
+        name = _to_str(props.get("PROPERTY_NAME_TEXT"), 300)
     if not name:
         return None
 

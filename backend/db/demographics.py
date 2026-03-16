@@ -104,6 +104,8 @@ async def aggregate_demographics(
     families_with_children = 0
     owner_occupied = 0
     renter_occupied = 0
+    renter_households_b25070 = 0
+    cost_burdened_renter_hh = 0
     below_poverty = 0
     seniors_below_poverty = 0
     seniors_living_alone = 0
@@ -137,6 +139,8 @@ async def aggregate_demographics(
         families_with_children += t.families_with_own_children or 0
         owner_occupied += t.owner_occupied or 0
         renter_occupied += t.renter_occupied or 0
+        renter_households_b25070 += t.renter_households_b25070 or 0
+        cost_burdened_renter_hh += t.cost_burdened_renter_households or 0
         below_poverty += t.population_below_poverty or 0
         seniors_below_poverty += t.seniors_below_poverty or 0
         seniors_living_alone += t.seniors_living_alone or 0
@@ -233,13 +237,19 @@ async def aggregate_demographics(
         + income_brackets.get("200k_plus", 0)
     )
 
-    # Build seniors_by_direction using tract centroids and bearing from analysis center
+    # Build seniors_by_direction and housing_by_direction using tract centroids
     seniors_by_direction: dict[str, dict] = {}
+    _dirs = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
     dir_buckets: dict[str, dict[str, float]] = {
         d: {"seniors_65_plus": 0.0, "seniors_75_plus": 0.0,
             "seniors_living_alone": 0.0, "seniors_below_poverty": 0.0}
-        for d in ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        for d in _dirs
     }
+    housing_dir_buckets: dict[str, dict[str, float]] = {
+        d: {"renter_households": 0.0, "cost_burdened_renters": 0.0}
+        for d in _dirs
+    }
+    has_directional = False
     for t in tracts:
         if t.centroid is None:
             continue
@@ -248,6 +258,7 @@ async def aggregate_demographics(
             tract_lat, tract_lon = pt.y, pt.x
         except Exception:
             continue
+        has_directional = True
         b = bearing(lat, lon, tract_lat, tract_lon)
         d = direction_from_bearing(b)
         s65 = (t.population_65_74 or 0) + (t.population_75_plus or 0)
@@ -255,6 +266,9 @@ async def aggregate_demographics(
         dir_buckets[d]["seniors_75_plus"] += t.population_75_plus or 0
         dir_buckets[d]["seniors_living_alone"] += t.seniors_living_alone or 0
         dir_buckets[d]["seniors_below_poverty"] += t.seniors_below_poverty or 0
+        # Housing burden by direction
+        housing_dir_buckets[d]["renter_households"] += t.renter_households_b25070 or 0
+        housing_dir_buckets[d]["cost_burdened_renters"] += t.cost_burdened_renter_households or 0
 
     for d, vals in dir_buckets.items():
         s65 = round(vals["seniors_65_plus"])
@@ -266,6 +280,19 @@ async def aggregate_demographics(
             "seniors_below_poverty": round(vals["seniors_below_poverty"]),
             "isolation_ratio": round(alone / s65, 3) if s65 > 0 else None,
         }
+
+    housing_by_direction: dict[str, dict] | None = None
+    if has_directional and cost_burdened_renter_hh > 0:
+        housing_by_direction = {}
+        for d in _dirs:
+            hvals = housing_dir_buckets[d]
+            rh = round(hvals["renter_households"])
+            cb = round(hvals["cost_burdened_renters"])
+            housing_by_direction[d] = {
+                "cost_burdened_renters": cb,
+                "renter_households": rh,
+                "burden_ratio": round(cb / rh, 3) if rh > 0 else None,
+            }
 
     # Derive county_name from tracts (use first available county_fips → state lookup)
     county_name = None
@@ -320,6 +347,9 @@ async def aggregate_demographics(
         "county_name": county_name,
         "owner_occupied": owner_occupied,
         "renter_occupied": renter_occupied,
+        "renter_households": renter_households_b25070 if renter_households_b25070 > 0 else None,
+        "cost_burdened_renter_households": cost_burdened_renter_hh if cost_burdened_renter_hh > 0 else None,
+        "housing_by_direction": housing_by_direction,
         "private_school_enrolled": total_enrolled_private_k_12,
         "total_school_enrolled": total_enrolled_k_12,
         "historical_2017": historical_2017,
@@ -386,4 +416,7 @@ def _empty_demographics(state_fips: str) -> dict:
         "income_brackets": {},
         "income_distribution": [],
         "county_name": None,
+        "renter_households": None,
+        "cost_burdened_renter_households": None,
+        "housing_by_direction": None,
     }
