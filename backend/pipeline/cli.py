@@ -34,7 +34,14 @@ async def cmd_init_db():
     print("Database initialized successfully.")
 
 
+async def _ensure_schema():
+    """Run init_db() so any pending ADD COLUMN migrations are applied."""
+    from db.connection import init_db
+    await init_db()
+
+
 async def cmd_ingest_census(args):
+    await _ensure_schema()
     from pipeline.ingest_census import _ingest_acs_data_async
     states = args.states.split(",") if args.states else None
     print(f"Ingesting Census ACS {args.vintage} data...")
@@ -43,6 +50,7 @@ async def cmd_ingest_census(args):
 
 
 async def cmd_ingest_schools():
+    await _ensure_schema()
     from pipeline.ingest_schools import _ingest_pss_async
     print("Ingesting NCES PSS school data...")
     result = await _ingest_pss_async()
@@ -50,6 +58,7 @@ async def cmd_ingest_schools():
 
 
 async def cmd_ingest_elder_care():
+    await _ensure_schema()
     from pipeline.ingest_elder_care import _ingest_cms_async
     print("Ingesting CMS elder care data...")
     result = await _ingest_cms_async()
@@ -57,6 +66,7 @@ async def cmd_ingest_elder_care():
 
 
 async def cmd_ingest_housing():
+    await _ensure_schema()
     from pipeline.ingest_housing import _ingest_housing_all_async
     print("Ingesting HUD housing (property + tenant + qct)...")
     result = await _ingest_housing_all_async()
@@ -64,6 +74,7 @@ async def cmd_ingest_housing():
 
 
 async def cmd_ingest_hud_property():
+    await _ensure_schema()
     from pipeline.ingest_housing import _ingest_hud_property_async
     print("Ingesting HUD LIHTC property data...")
     result = await _ingest_hud_property_async()
@@ -71,6 +82,7 @@ async def cmd_ingest_hud_property():
 
 
 async def cmd_ingest_hud_tenant():
+    await _ensure_schema()
     from pipeline.ingest_housing import _ingest_hud_tenant_async
     print("Ingesting HUD LIHTC tenant data...")
     result = await _ingest_hud_tenant_async()
@@ -78,6 +90,7 @@ async def cmd_ingest_hud_tenant():
 
 
 async def cmd_ingest_hud_qct():
+    await _ensure_schema()
     from pipeline.ingest_housing import _ingest_hud_qct_async
     print("Ingesting HUD QCT/DDA data...")
     result = await _ingest_hud_qct_async()
@@ -85,6 +98,7 @@ async def cmd_ingest_hud_qct():
 
 
 async def cmd_ingest_hud_section202():
+    await _ensure_schema()
     from pipeline.ingest_hud_section202 import _ingest_hud_section202_async
     print("Ingesting HUD Section 202 senior housing data...")
     result = await _ingest_hud_section202_async()
@@ -92,6 +106,7 @@ async def cmd_ingest_hud_section202():
 
 
 async def cmd_ingest_all(args):
+    await _ensure_schema()
     await cmd_ingest_census(args)
     await cmd_ingest_schools()
     await cmd_ingest_elder_care()
