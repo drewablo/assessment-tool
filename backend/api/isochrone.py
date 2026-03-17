@@ -14,6 +14,7 @@ falls back to grade-level-adaptive radii (see GRADE_LEVEL_FALLBACK_RADIUS).
 """
 
 import logging
+import math
 import os
 from typing import Optional
 
@@ -84,6 +85,37 @@ async def get_isochrone(
         except Exception as e:
             logger.error("ORS isochrone error: %s", e)
             return None
+
+
+def build_radius_polygon(lat: float, lon: float, radius_km: float, points: int = 72) -> dict:
+    """Build a geodesic circle polygon around a center point.
+
+    Returns a GeoJSON Polygon with [lon, lat] coordinates.
+    """
+    if radius_km <= 0:
+        return {"type": "Polygon", "coordinates": [[[lon, lat], [lon, lat], [lon, lat], [lon, lat]]]}
+
+    earth_radius_km = 6371.0088
+    angular_distance = radius_km / earth_radius_km
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+
+    ring = []
+    for i in range(points):
+        bearing = 2 * math.pi * i / points
+        lat2 = math.asin(
+            math.sin(lat1) * math.cos(angular_distance)
+            + math.cos(lat1) * math.sin(angular_distance) * math.cos(bearing)
+        )
+        lon2 = lon1 + math.atan2(
+            math.sin(bearing) * math.sin(angular_distance) * math.cos(lat1),
+            math.cos(angular_distance) - math.sin(lat1) * math.sin(lat2),
+        )
+        lon2 = (lon2 + 3 * math.pi) % (2 * math.pi) - math.pi
+        ring.append([math.degrees(lon2), math.degrees(lat2)])
+
+    ring.append(ring[0])
+    return {"type": "Polygon", "coordinates": [ring]}
 
 
 def isochrone_effective_radius_miles(

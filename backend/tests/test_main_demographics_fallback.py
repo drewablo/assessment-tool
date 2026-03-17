@@ -290,3 +290,57 @@ async def test_run_analysis_enriches_legacy_elder_demographics_from_live(monkeyp
     assert live_calls["count"] == 1
     assert context["used_live_senior_enrichment"] is True
     assert any("senior demographics incomplete" in note.lower() for note in context["fallback_notes"])
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_radius_mode_skips_ors_and_builds_radius_polygon(monkeypatch):
+    monkeypatch.setattr(main, "USE_DB", False)
+
+    async def should_not_call_isochrone(_lat, _lon, _drive):
+        raise AssertionError("ORS isochrone should not be called in radius mode")
+
+    async def fake_live_demographics(**kwargs):
+        assert kwargs["radius_miles"] == 24
+        polygon = kwargs["isochrone_polygon"]
+        assert polygon and polygon.get("type") == "Polygon"
+        return {"tract_count": 6, "total_population": 9100}
+
+    async def fake_data_freshness():
+        return None
+
+    def fake_benchmark(_result):
+        return None
+
+    class _Result:
+        def __init__(self):
+            self.ministry_type = None
+            self.trace_id = None
+            self.data_freshness = None
+            self.benchmark_narrative = None
+            self.recommendation = "ok"
+            self.feasibility_score = types.SimpleNamespace(overall=75)
+
+    async def fake_analyzer(**kwargs):
+        assert kwargs["catchment_type"] == "radius"
+        assert kwargs["isochrone_polygon"] and kwargs["isochrone_polygon"].get("type") == "Polygon"
+        return _Result()
+
+    monkeypatch.setattr(main, "get_isochrone", should_not_call_isochrone)
+    monkeypatch.setattr(main, "get_demographics", fake_live_demographics)
+    monkeypatch.setattr(main, "_build_data_freshness_metadata", fake_data_freshness)
+    monkeypatch.setattr(main, "_build_benchmark_narrative", fake_benchmark)
+    monkeypatch.setitem(main.MODULE_REGISTRY, "schools", types.SimpleNamespace(analyzer=fake_analyzer))
+
+    request = AnalysisRequest(
+        school_name="Radius Mode Test",
+        address="123 Main St",
+        ministry_type="schools",
+        drive_minutes=24,
+        geography_mode="radius",
+    )
+    location = {"lat": 41.0, "lon": -87.0, "state_fips": "17", "county_fips": "031"}
+
+    result, context = await main._run_analysis(location, request)
+
+    assert result.feasibility_score.overall == 75
+    assert context["fallback_notes"] == []
