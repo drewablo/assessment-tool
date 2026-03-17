@@ -1,6 +1,7 @@
 export type MinistryType = "schools" | "housing" | "elder_care";
 export type CareLevel = "all" | "snf" | "assisted_living" | "memory_care";
 export type HousingTargetPopulation = "senior_only" | "all_ages";
+export type GeographyMode = "catchment" | "radius";
 
 export interface Stage2FinancialYear {
   year: number;
@@ -90,6 +91,7 @@ export interface AnalysisRequest {
   ministry_type: MinistryType;
   mission_mode: boolean;
   drive_minutes: number;
+  geography_mode: GeographyMode;
   gender: "coed" | "boys" | "girls";
   grade_level: "k5" | "k8" | "high_school" | "k12";
   weighting_profile: "standard_baseline" | "affordability_sensitive" | "demand_primacy";

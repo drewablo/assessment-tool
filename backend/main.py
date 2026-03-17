@@ -46,6 +46,7 @@ from api.census import get_demographics
 from api.reports import generate_csv_report
 from modules import MODULE_REGISTRY
 from api.isochrone import (
+    build_radius_polygon,
     get_isochrone,
     isochrone_effective_radius_miles,
     GRADE_LEVEL_FALLBACK_RADIUS,
@@ -511,13 +512,14 @@ def _apply_reliability_metadata(result: AnalysisResponse, *, run_mode: str, depe
     if competitor_dep and competitor_dep not in missing:
         inputs_used.append(competitor_label)
 
+    catchment_fallback = any("isochrone unavailable" in note.lower() for note in fallback_notes)
     result.section_explanations = [
         SectionExplanation(
             section="catchment",
             inputs_used=["isochrone" if result.catchment_mode == "isochrone" else "radius"],
             inputs_missing=[],
-            fallback_used=["radius fallback"] if result.catchment_mode == "radius" else [],
-            confidence_impact="medium" if result.catchment_mode == "radius" else "low",
+            fallback_used=["radius fallback"] if catchment_fallback else [],
+            confidence_impact="medium" if catchment_fallback else "low",
         ),
         SectionExplanation(
             section="demographics_and_competition",
@@ -1656,56 +1658,63 @@ async def _run_analysis(location: dict, request: AnalysisRequest, run_mode: str 
     drive_minutes = request.drive_minutes
     grade_level = request.grade_level
 
-    # Step 1: Attempt isochrone fetch (with DB cache when enabled)
+    # Step 1: Build catchment polygon (ORS isochrone for catchment mode, geodesic circle for radius mode)
     isochrone_polygon = None
     fallback_notes: list[str] = []
-    if USE_DB:
-        from db.connection import get_session
-        from db.queries import lookup_cached_isochrone, save_isochrone
 
-        async with get_session() as session:
-            cached = await lookup_cached_isochrone(
-                session,
-                lat=location["lat"],
-                lon=location["lon"],
-                drive_minutes=drive_minutes,
-                max_age_hours=ISOCHRONE_CACHE_TTL_HOURS,
-            )
-            if cached and cached.polygon_geojson:
-                import json
-
-                isochrone_polygon = json.loads(cached.polygon_geojson)
-
-    if not isochrone_polygon:
-        isochrone_polygon = await get_isochrone(location["lat"], location["lon"], drive_minutes)
-
-    if isochrone_polygon:
-        effective_radius = isochrone_effective_radius_miles(
-            location["lat"], location["lon"], isochrone_polygon
-        )
-        catchment_type = "isochrone"
-
+    if request.geography_mode == "radius":
+        effective_radius = float(drive_minutes)
+        radius_km = effective_radius * 1.60934
+        isochrone_polygon = build_radius_polygon(location["lat"], location["lon"], radius_km)
+        catchment_type = "radius"
+    else:
         if USE_DB:
             from db.connection import get_session
-            from db.queries import save_isochrone
+            from db.queries import lookup_cached_isochrone
 
-            try:
-                async with get_session() as session:
-                    await save_isochrone(
-                        session,
-                        lat=location["lat"],
-                        lon=location["lon"],
-                        drive_minutes=drive_minutes,
-                        polygon_geojson=isochrone_polygon,
-                        effective_radius_miles=effective_radius,
-                    )
-                    await session.commit()
-            except Exception:
-                logger.warning("Failed to cache isochrone for (%.4f, %.4f) %dmin", location["lat"], location["lon"], drive_minutes, exc_info=True)
-    else:
-        effective_radius = GRADE_LEVEL_FALLBACK_RADIUS.get(grade_level, 12.0)
-        catchment_type = "radius"
-        fallback_notes.append("Isochrone unavailable; used grade-level radius fallback.")
+            async with get_session() as session:
+                cached = await lookup_cached_isochrone(
+                    session,
+                    lat=location["lat"],
+                    lon=location["lon"],
+                    drive_minutes=drive_minutes,
+                    max_age_hours=ISOCHRONE_CACHE_TTL_HOURS,
+                )
+                if cached and cached.polygon_geojson:
+                    import json
+
+                    isochrone_polygon = json.loads(cached.polygon_geojson)
+
+        if not isochrone_polygon:
+            isochrone_polygon = await get_isochrone(location["lat"], location["lon"], drive_minutes)
+
+        if isochrone_polygon:
+            effective_radius = isochrone_effective_radius_miles(
+                location["lat"], location["lon"], isochrone_polygon
+            )
+            catchment_type = "isochrone"
+
+            if USE_DB:
+                from db.connection import get_session
+                from db.queries import save_isochrone
+
+                try:
+                    async with get_session() as session:
+                        await save_isochrone(
+                            session,
+                            lat=location["lat"],
+                            lon=location["lon"],
+                            drive_minutes=drive_minutes,
+                            polygon_geojson=isochrone_polygon,
+                            effective_radius_miles=effective_radius,
+                        )
+                        await session.commit()
+                except Exception:
+                    logger.warning("Failed to cache isochrone for (%.4f, %.4f) %dmin", location["lat"], location["lon"], drive_minutes, exc_info=True)
+        else:
+            effective_radius = GRADE_LEVEL_FALLBACK_RADIUS.get(grade_level, 12.0)
+            catchment_type = "radius"
+            fallback_notes.append("Isochrone unavailable; used grade-level radius fallback.")
 
     # Step 2: Fetch demographics (DB-backed first, with automatic live fallback)
     demographics = None

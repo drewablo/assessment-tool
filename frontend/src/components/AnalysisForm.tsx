@@ -21,6 +21,7 @@ import {
   ElderCareStage2Inputs,
   FacilityProfile,
   HousingTargetPopulation,
+  GeographyMode,
 } from "@/lib/types";
 import { extractSchoolAuditFinancials } from "@/lib/api";
 
@@ -213,6 +214,7 @@ export default function AnalysisForm({
   const [minMdsOverallRating, setMinMdsOverallRating] = useState<"" | "1" | "2" | "3" | "4" | "5">("");
   const [gradeLevel, setGradeLevel] = useState<AnalysisRequest["grade_level"]>("k12");
   const [driveMinutes, setDriveMinutes] = useState(GRADE_LEVEL_DEFAULT_MINUTES.k12);
+  const [geographyMode, setGeographyMode] = useState<GeographyMode>("catchment");
   const [gender, setGender] = useState<AnalysisRequest["gender"]>("coed");
   const [weightingProfile, setWeightingProfile] =
     useState<AnalysisRequest["weighting_profile"]>("standard_baseline");
@@ -357,6 +359,7 @@ export default function AnalysisForm({
       ministry_type: ministryType,
       mission_mode: showElderFields ? missionMode : false,
       drive_minutes: driveMinutes,
+      geography_mode: geographyMode,
       gender,
       grade_level: gradeLevel,
       weighting_profile: weightingProfile,
@@ -397,6 +400,7 @@ export default function AnalysisForm({
     );
     setGradeLevel(initialRequest.grade_level ?? "k12");
     setDriveMinutes(initialRequest.drive_minutes ?? GRADE_LEVEL_DEFAULT_MINUTES.k12);
+    setGeographyMode(initialRequest.geography_mode ?? "catchment");
     setGender(initialRequest.gender ?? "coed");
     setWeightingProfile(initialRequest.weighting_profile ?? "standard_baseline");
     setMarketContext(initialRequest.market_context ?? "suburban");
@@ -654,20 +658,35 @@ export default function AnalysisForm({
         </div>
       )}
 
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">
-          <Clock className="inline w-4 h-4 mr-1 text-gray-400" />
-          Drive-Time Catchment: <span className="text-navy-600 font-bold">{driveMinutes} min</span>
-        </label>
-        <input
-          type="range"
-          min={5}
-          max={60}
-          step={5}
-          value={driveMinutes}
-          onChange={(e) => setDriveMinutes(Number(e.target.value))}
-          className="w-full accent-navy-600"
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Geography Mode</label>
+          <select
+            value={geographyMode}
+            onChange={(e) => setGeographyMode(e.target.value as GeographyMode)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm bg-white"
+          >
+            <option value="catchment">Drive-time catchment</option>
+            <option value="radius">Straight-line radius</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">
+            <Clock className="inline w-4 h-4 mr-1 text-gray-400" />
+            {geographyMode === "radius" ? "Radius (miles)" : "Drive-Time Catchment"}: {" "}
+            <span className="text-navy-600 font-bold">{driveMinutes} {geographyMode === "radius" ? "mi" : "min"}</span>
+          </label>
+          <input
+            type="range"
+            min={5}
+            max={60}
+            step={5}
+            value={driveMinutes}
+            onChange={(e) => setDriveMinutes(Number(e.target.value))}
+            className="w-full accent-navy-600"
+          />
+        </div>
       </div>
 
       <div>

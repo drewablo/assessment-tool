@@ -92,6 +92,7 @@ class AnalysisRequest(BaseModel):
     ministry_type: Literal["schools", "housing", "elder_care"] = "schools"
     mission_mode: bool = False
     drive_minutes: int = Field(default=20, ge=5, le=60)
+    geography_mode: Literal["catchment", "radius"] = "catchment"
     gender: Literal["coed", "boys", "girls"] = "coed"
     grade_level: Literal["k5", "k8", "high_school", "k12"] = "k12"
     weighting_profile: Literal["standard_baseline", "affordability_sensitive", "demand_primacy"] = "standard_baseline"
@@ -112,6 +113,7 @@ class CompareAnalysisRequest(BaseModel):
     )
     mission_mode: bool = False
     drive_minutes: int = Field(default=20, ge=5, le=60)
+    geography_mode: Literal["catchment", "radius"] = "catchment"
     gender: Literal["coed", "boys", "girls"] = "coed"
     grade_level: Literal["k5", "k8", "high_school", "k12"] = "k12"
     weighting_profile: Literal["standard_baseline", "affordability_sensitive", "demand_primacy"] = "standard_baseline"
