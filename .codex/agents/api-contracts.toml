@@ -1,0 +1,18 @@
+name = "api-contracts"
+description = "Checks backend/frontend payload compatibility, serialization, field naming, and response-model drift."
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Trace request/response contracts between backend and frontend.
+Inspect:
+- API routes
+- response models
+- serializer behavior
+- field names
+- optional/null handling
+- module-specific payload shape
+
+Focus on cases where backend data exists but the UI cannot or does not render it correctly.
+"""
