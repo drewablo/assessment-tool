@@ -96,11 +96,11 @@ PSS_AFFILIATION_NAMES = {
 }
 
 # PSS P335 codes (Q7A: Is School Coeducational)
-# 1=Yes (co-ed), 2=No, all-boys, 3=No, all-girls
+# 1=Yes (co-ed), 2=No, all-girls, 3=No, all-boys
 P335_NAMES = {
     "1": "Co-ed",
-    "2": "All Boys",
-    "3": "All Girls",
+    "2": "All Girls",
+    "3": "All Boys",
 }
 
 # PSS GRADE2 codes (Level of Instruction, Four Categories)
@@ -123,10 +123,10 @@ GRADE_LEVEL_FILTER = {
 
 # Which P335 values are relevant competitors for each gender type
 # (schools that draw from the same student pool)
-# P335: 1=Co-ed, 2=All-boys, 3=All-girls
+# P335: 1=Co-ed, 2=All-girls, 3=All-boys
 GENDER_FILTER = {
-    "boys":  {"2", "1"},      # All-boys + co-ed
-    "girls": {"3", "1"},      # All-girls + co-ed
+    "boys":  {"3", "1"},      # All-boys + co-ed
+    "girls": {"2", "1"},      # All-girls + co-ed
     "coed":  {"1", "2", "3"}, # All (co-ed competes with everyone)
 }
 
