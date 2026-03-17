@@ -66,7 +66,7 @@ from models.schemas import (
     MetricScore,
     PopulationGravityMap,
 )
-from utils import bearing, decay_weight, direction_from_bearing, piecewise_linear
+from utils import bearing, decay_weight, direction_from_bearing, piecewise_linear, saturation_decay_weight
 
 logger = logging.getLogger(__name__)
 
@@ -546,6 +546,15 @@ _PRIVATE_MATURITY_FLOOR_SEGMENTS = [
     (0.00, 0), (0.08, 0), (0.12, 45), (0.18, 60), (0.25, 72), (0.35, 80),
 ]
 
+# Density-based saturation cap: raw competitor count per 1,000 addressable
+# school-age population.  Even if distance decay makes individual schools
+# look harmless, high school density means families have abundant alternatives.
+# This caps how favorable saturation can score regardless of weighted capacity.
+_DENSITY_SATURATION_CAP_SEGMENTS = [
+    # schools_per_1k → maximum saturation score allowed
+    (0.0, 95), (1.0, 85), (3.0, 68), (6.0, 48), (10.0, 32), (18.0, 18), (30.0, 10),
+]
+
 # ---------------------------------------------------------------------------
 # Stage 2 KPI scoring breakpoints (piecewise-linear, same philosophy as Stage 1)
 # Each segment list maps a raw metric value → 0-100 score.
@@ -661,18 +670,17 @@ def _score_competition(
 
     Returns (combined_score, validation_score, saturation_score).
 
-    Market validation (60%): distance-decayed presence of Catholic schools,
-      floored by private-market maturity when the local private enrollment
-      rate is high (e.g. Main Line, Fairfield County).  In elite-private
-      markets the demand for private education is already proven even if
-      Catholic-specific presence is thin.
+    Market validation (60%): distance-decayed presence of Catholic schools
+      (steep 1/d^1.5 decay — proximity matters for demand signals), floored
+      by private-market maturity when local private enrollment is high.
 
-    Saturation pressure (40%): distance-decayed capacity (enrollment) relative
-      to target Catholic school-age population.  In markets with high private
-      enrollment, non-Catholic tier weights are boosted to reflect that elite
-      secular schools compete directly for the same affluent families.
+    Saturation pressure (40%): distance-decayed capacity relative to target
+      population (softer 1/d^1.0 decay — families consider schools across a
+      wide radius).  Capped by a raw density floor so markets with very high
+      school counts can never score as "unsaturated".
 
-    Each competitor's weight = 1 / max(0.5, distance_miles)^1.5
+    In high-private-enrollment markets, non-Catholic tier weights are boosted
+    because elite secular schools compete directly for the same families.
     """
     private_rate = local_private_rate or 0.0
     catholic_schools = [s for s in schools if s.get("is_catholic")]
@@ -680,11 +688,15 @@ def _score_competition(
     if not catholic_schools:
         # Unserved market — validation is low but saturation is nil
         val_score = piecewise_linear(est_catholic_school_age, _UNSERVED_MARKET_SEGMENTS)
-        # Even with no Catholic schools, a mature private market proves demand
         if private_rate > 0.08:
             maturity_floor = piecewise_linear(private_rate, _PRIVATE_MATURITY_FLOOR_SEGMENTS)
             val_score = max(val_score, maturity_floor)
-        sat_score = 90.0  # No saturation whatsoever
+        sat_score = 90.0
+        # Apply density cap even with no Catholic schools
+        if est_catholic_school_age > 0 and schools:
+            density_per_1k = len(schools) * 1000 / est_catholic_school_age
+            density_cap = piecewise_linear(density_per_1k, _DENSITY_SATURATION_CAP_SEGMENTS)
+            sat_score = min(sat_score, density_cap)
         combined = val_score * 0.6 + sat_score * 0.4
         return combined, val_score, sat_score
 
@@ -693,17 +705,13 @@ def _score_competition(
     # In markets where private enrollment is high, non-Catholic schools
     # compete more directly for the same families.  Scale their tier weights
     # up so saturation reflects real competitive pressure.
-    # Below 10% private rate → no boost (normal market).
-    # At 20%+ private rate → non-Catholic weights approach full (1.0).
     if private_rate > 0.10:
-        # Linear ramp: at 10% → multiplier 1.0, at 25% → multiplier 2.25
-        # Effective tier weight = min(1.0, base_tier * multiplier)
         _intensity_multiplier = min(2.5, 1.0 + (private_rate - 0.10) / 0.12)
     else:
         _intensity_multiplier = 1.0
 
-    def _competitor_weight(competitor: dict) -> float:
-        weight = decay_weight(competitor["distance_miles"])
+    def _direction_multiplier(competitor: dict) -> float:
+        """Direction-based population weighting (shared by both branches)."""
         if (
             population_by_direction
             and school_lat is not None
@@ -714,34 +722,39 @@ def _score_competition(
             direction = direction_from_bearing(b)
             direction_pop = population_by_direction.get(direction, 0)
             direction_share = direction_pop / direction_total_pop if direction_total_pop > 0 else 0.0
-            multiplier = min(1.5, 1.0 + direction_share)
-            weight *= multiplier
-        # Apply competitor tier weight — Catholic schools get full weight,
-        # secular/religious schools get reduced weight, niche schools get minimal.
-        # In high-private-enrollment markets, non-Catholic weights are boosted.
-        tier_weight = competitor.get("tier_weight", 0.4)
+            return min(1.5, 1.0 + direction_share)
+        return 1.0
+
+    def _effective_tier_weight(competitor: dict) -> float:
+        """Tier weight, boosted for non-Catholic in high-private-rate markets."""
+        tw = competitor.get("tier_weight", 0.4)
         if not competitor.get("is_catholic") and _intensity_multiplier > 1.0:
-            tier_weight = min(1.0, tier_weight * _intensity_multiplier)
-        weight *= tier_weight
-        return weight
+            tw = min(1.0, tw * _intensity_multiplier)
+        return tw
 
-    # Sum of distance-decayed weights (presence signal)
-    total_weight = sum(_competitor_weight(s) for s in catholic_schools)
+    # --- Validation: steep decay (1/d^1.5) — proximity matters for demand signal ---
+    def _validation_weight(competitor: dict) -> float:
+        w = decay_weight(competitor["distance_miles"])
+        w *= _direction_multiplier(competitor)
+        w *= _effective_tier_weight(competitor)
+        return w
 
-    # Validation: how strong is the distance-decayed Catholic school presence?
+    total_weight = sum(_validation_weight(s) for s in catholic_schools)
     val_score = piecewise_linear(total_weight, _VALIDATION_WEIGHT_SEGMENTS)
 
-    # In high-private-enrollment markets, floor validation to reflect that
-    # the demand for private education is already proven.
     if private_rate > 0.08:
         maturity_floor = piecewise_linear(private_rate, _PRIVATE_MATURITY_FLOOR_SEGMENTS)
         val_score = max(val_score, maturity_floor)
 
-    # Saturation: distance-decayed capacity vs. target population
-    # Fall back to 250 students/school if enrollment data is missing
-    # All schools contribute to saturation pressure, weighted by tier
+    # --- Saturation: soft decay (1/d^1.0) — families consider wider radius ---
+    def _saturation_weight(competitor: dict) -> float:
+        w = saturation_decay_weight(competitor["distance_miles"])
+        w *= _direction_multiplier(competitor)
+        w *= _effective_tier_weight(competitor)
+        return w
+
     weighted_capacity = sum(
-        (s.get("enrollment") or 250) * _competitor_weight(s)
+        (s.get("enrollment") or 250) * _saturation_weight(s)
         for s in schools
     )
     if est_catholic_school_age > 0:
@@ -750,6 +763,14 @@ def _score_competition(
         saturation_ratio = 1.0
 
     sat_score = piecewise_linear(saturation_ratio, _SATURATION_RATIO_SEGMENTS)
+
+    # Density floor: cap saturation based on raw school count regardless of
+    # distance weighting.  Prevents dense markets (Main Line, Fairfield County)
+    # from scoring as "unsaturated" just because decay spreads schools thin.
+    if est_catholic_school_age > 0:
+        density_per_1k = len(schools) * 1000 / est_catholic_school_age
+        density_cap = piecewise_linear(density_per_1k, _DENSITY_SATURATION_CAP_SEGMENTS)
+        sat_score = min(sat_score, density_cap)
 
     # Validation outweighs saturation: NCEA 2024-2025 shows 39.3% of schools
     # have waiting lists, meaning existing Catholic school presence is more
