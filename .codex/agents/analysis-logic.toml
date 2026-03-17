@@ -1,0 +1,18 @@
+name = "analysis-logic"
+description = "Validates formulas, score composition, thresholds, fallbacks, and module-specific analysis behavior."
+model = "gpt-5.4"
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+Focus on scoring and business logic.
+Check:
+- formulas and weights
+- threshold logic
+- percentile or benchmark logic
+- null/default handling
+- module-specific language and output correctness
+- graceful degradation when inputs are incomplete
+
+Call out misleading outputs even when code technically runs.
+"""
