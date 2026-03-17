@@ -34,6 +34,17 @@ def decay_weight(dist_miles: float) -> float:
     return 1.0 / max(0.5, dist_miles) ** 1.5
 
 
+def saturation_decay_weight(dist_miles: float) -> float:
+    """Softer inverse-distance weight for saturation scoring.
+
+    Uses 1/d^1.0 instead of 1/d^1.5 because families consider schools
+    across a wider range than proximity-weighted demand signals suggest.
+    On the Main Line, in Fairfield County, etc., families routinely compare
+    schools 5–10 miles away as direct alternatives.
+    """
+    return 1.0 / max(0.5, dist_miles) ** 1.0
+
+
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate great-circle distance in miles between two lat/lon coordinates."""
     R = 3958.8
