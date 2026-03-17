@@ -97,6 +97,7 @@ PSS_AFFILIATION_NAMES = {
 
 # PSS P335 codes (Q7A: Is School Coeducational)
 # 1=Yes (co-ed), 2=No, all-girls, 3=No, all-boys
+# Source: NCES PSS 2021-22 codebook, Appendix C
 P335_NAMES = {
     "1": "Co-ed",
     "2": "All Girls",
