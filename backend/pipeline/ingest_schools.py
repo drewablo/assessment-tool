@@ -45,11 +45,11 @@ EXCLUDED_SCHOOLS = {
 }
 
 # Coeducation code mapping (P335)
-# 1=Yes (co-ed), 2=No, all-boys, 3=No, all-girls
+# 1=Yes (co-ed), 2=No, all-girls, 3=No, all-boys
 COED_MAP = {
     1: "Co-ed",
-    2: "All Boys",
-    3: "All Girls",
+    2: "All Girls",
+    3: "All Boys",
 }
 
 # Grade level mapping (GRADE2)
