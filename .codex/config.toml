@@ -1,1 +1,8 @@
+model = "gpt-5.4"
 
+[agents]
+max_threads = 6
+max_depth = 1
+
+project_doc_fallback_filenames = ["AGENTS.md"]
+project_doc_max_bytes = 65536
