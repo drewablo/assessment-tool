@@ -352,3 +352,90 @@ The prompt refers to `/docs/design-reference/`, but that directory was absent du
 
 ### Overall conclusion
 The repo is **well-positioned for the dashboard overhaul**, but the requested experience is **not a thin frontend reskin**. It requires new shared components, new dashboard-specific API contracts, ZIP/ZCTA data ingest, and a generalized projection layer. The safest path is to keep the existing assessment flow intact and build the new dashboard experience alongside it.
+
+---
+
+## 9. Implementation status update (after Phases 1 and 2 preview scaffolding)
+
+This section records what has been addressed since the original Phase 0 audit and what still needs to happen before Phase 3 should begin.
+
+### 9.1 Addressed so far
+
+#### Addressed from Phase 1
+- **Shared frontend analytics components now exist** in the repo for the requested dashboard direction:
+  - `ChoroplethMap`
+  - `TrendChart`
+  - `DistributionChart`
+  - `ZipDrilldownCard`
+  - `TabbedSubview`
+  - `DashboardSidebar`
+  - `ParameterBar`
+- **Client-side download affordances exist** for PNG and CSV in the shared dashboard components.
+- **Dashboard contract scaffolding exists** in `backend/docs/dashboard_api_contracts.md`.
+- **A shared projection utility scaffold exists** in `backend/services/projections.py`.
+
+#### Addressed from Phase 2
+- **Module-specific dashboard preview routes now exist** for:
+  - Schools
+  - Elder Care
+  - Low-Income Housing
+- **A module gallery / preview entry point exists** under `/dashboard-preview`.
+- **Module-specific sidebar/domain structures have been prototyped** using the shared component system.
+- **The existing assessment flow has been preserved**; the new dashboard work is still additive and preview-oriented.
+
+### 9.2 Still not addressed
+
+The major data and integration blockers identified in the original audit remain largely unresolved:
+
+- **No ZIP/ZCTA boundary ingestion pipeline exists yet.**
+- **No live ZIP-level dashboard endpoint exists yet.**
+- **No backend endpoint returns a ZIP `FeatureCollection` populated with metric properties.**
+- **No real per-ZIP drilldown payloads exist for schools, elder care, or housing.**
+- **The current module dashboards are still preview/mock-data-driven, not wired to production API responses.**
+- **Projection support is still scaffold-level rather than fully integrated into dashboard endpoints.**
+- **Schools / Elder Care / Housing dashboards are not yet mounted into the post-analysis results flow as live module dashboards.**
+- **Performance work for large GeoJSON payloads has not yet been implemented.**
+- **Phase 3 testing coverage for the new dashboard stack has not yet been added.**
+
+### 9.3 What needs to be addressed next before moving to Phase 3
+
+Before Phase 3 (testing/performance hardening) begins, the following Phase 1/2 implementation work still needs to be completed:
+
+1. **ZIP/ZCTA data pipeline**
+   - Ingest Census ZCTA boundaries.
+   - Cache them in a form usable by the backend.
+   - Support catchment-level ZIP selection for all three modules.
+
+2. **Live dashboard API wiring**
+   - Add additive dashboard endpoints or dashboard-specific payload branches.
+   - Return:
+     - `zipCodes`
+     - ZIP `FeatureCollection`
+     - per-ZIP metric maps
+     - drilldown payloads
+     - metadata / freshness / projection years
+
+3. **Projection integration**
+   - Promote the current projection scaffold into a real shared backend service.
+   - Return historical + projected time-series arrays in the dashboard contract shape.
+   - Add confidence bands / labels so projections are never presented as fact.
+
+4. **Module-specific real data mapping**
+   - Schools: affordability, enrollment, student-body, and competitor views backed by live data.
+   - Elder Care: senior cohort, facilities, quality gaps, and 5-/10-year projections backed by live data.
+   - Housing: burden, income thresholds, existing resources, and demographic trend views backed by live data.
+
+5. **Frontend integration into the real user flow**
+   - Decide where the live module dashboards appear after analysis.
+   - Keep the current Stage 1 / Stage 2 results available during rollout.
+   - Replace preview/mock wiring with live API data while preserving graceful empty/error states.
+
+6. **Performance prerequisites**
+   - Geometry simplification and/or viewport-aware loading for ZIP polygons.
+   - Memoization / render controls for charts and drilldowns.
+   - Caching strategy for ZIP GeoJSON and dashboard responses.
+
+### 9.4 Phase gate recommendation
+
+**Do not treat the project as ready for Phase 3 yet.**  
+The UI scaffolding and preview routes are now in place, but the backend ZIP pipeline, live dashboard endpoints, real projection integration, and live module wiring still need to land first. Phase 3 should begin only after the dashboards are powered by real module data rather than preview scaffolds.
