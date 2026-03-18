@@ -36,22 +36,25 @@ from services.projections import HistoricalValue, build_projection_envelope
 
 logger = logging.getLogger(__name__)
 
+# --- New per-ZIP directory layout produced by ingest-zcta ---
+# data/zcta/bbox_index.json.gz  (~200KB — zip_code -> [minx, miny, maxx, maxy])
+# data/zcta/33901.json.gz       (~5-15KB per ZIP)
+# data/zcta/33971.json.gz
+# data/zcta/_ready               (marker file)
+ZCTA_CACHE_DIR = Path(os.getenv("ZCTA_CACHE_DIR", Path(__file__).resolve().parents[1] / "data" / "zcta"))
+# Legacy single-file path (for backward-compatible cache status reporting)
 ZCTA_CACHE_PATH = Path(os.getenv("ZCTA_CACHE_PATH", Path(__file__).resolve().parents[1] / "data" / "zcta_boundaries.json.gz"))
-ZCTA_BBOX_INDEX_PATH = ZCTA_CACHE_PATH.with_name("zcta_bbox_index.json.gz")
+
 DASHBOARD_DATA_YEAR = int(os.getenv("DASHBOARD_DATA_YEAR", "2024"))
 DASHBOARD_PROJECTION_HORIZON = int(os.getenv("DASHBOARD_PROJECTION_HORIZON", "5"))
 DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "24"))
 
 
-# ---------------------------------------------------------------------------
-# Lightweight ZCTA bbox entry — NO Shapely objects, NO full feature dicts.
-# The entire US (~33k entries) fits in ~5MB of memory.
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class ZctaBboxEntry:
+    """Minimal bbox-only record. The full US (~33k entries) fits in ~5MB."""
     zip_code: str
-    bounds: tuple[float, float, float, float]  # (minx, miny, maxx, maxy)
+    bounds: tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,18 @@ class DashboardSpatialContext:
 
 
 def zcta_cache_status() -> dict[str, Any]:
+    """Report cache readiness. Checks for the new per-ZIP directory first, falls back to legacy."""
+    new_ready = (ZCTA_CACHE_DIR / "_ready").exists()
+    new_index = ZCTA_CACHE_DIR / "bbox_index.json.gz"
+    if new_ready and new_index.exists():
+        return {
+            "path": str(ZCTA_CACHE_DIR),
+            "exists": True,
+            "size_bytes": new_index.stat().st_size,
+            "ready": True,
+            "format": "per_zip_directory",
+        }
+    # Legacy single-file check
     exists = ZCTA_CACHE_PATH.exists()
     size_bytes = ZCTA_CACHE_PATH.stat().st_size if exists else 0
     return {
@@ -72,135 +87,81 @@ def zcta_cache_status() -> dict[str, Any]:
         "exists": exists,
         "size_bytes": size_bytes,
         "ready": bool(exists and size_bytes > 0),
+        "format": "legacy_single_file" if exists else "none",
     }
 
 
 # ---------------------------------------------------------------------------
 # Memory-efficient ZCTA loading
 #
-# OLD approach (OOM on 8GB):
-#   - json.load() the full ~100MB gzip into memory
-#   - Create Shapely geometry objects for all ~33k ZCTAs
-#   - Hold everything in an lru_cache forever (~2-4GB)
-#
-# NEW approach (~5MB permanent, ~200MB temporary per request):
-#   - Keep only a zip_code -> bbox index in the lru_cache (~5MB)
-#   - On each request, bbox-filter to ~100 candidates, then re-read
-#     only those features from the full file and create Shapely objects
-#     only for the candidates.
+# Permanent memory: ~5MB (bbox index only)
+# Per-request memory: ~1-2MB (read ~100 individual 5-15KB gzip files)
+# Peak total: <50MB
 # ---------------------------------------------------------------------------
-
-def _bbox_from_coordinates(coords) -> tuple[float, float, float, float] | None:
-    """Extract bounding box from GeoJSON coordinates without Shapely."""
-    all_points: list[tuple[float, float]] = []
-
-    def _collect(c):
-        if not c:
-            return
-        if isinstance(c[0], (int, float)):
-            all_points.append((float(c[0]), float(c[1])))
-        else:
-            for item in c:
-                _collect(item)
-
-    _collect(coords)
-    if not all_points:
-        return None
-    xs = [p[0] for p in all_points]
-    ys = [p[1] for p in all_points]
-    return (min(xs), min(ys), max(xs), max(ys))
-
 
 @lru_cache(maxsize=1)
 def _load_zcta_bbox_index() -> dict[str, ZctaBboxEntry]:
-    """Load the lightweight bbox index. Prefers the small index file (~200KB)."""
+    """Load the bbox index (~200KB). Never touches individual ZIP geometry files."""
 
-    # Prefer the pre-built index file (written by ingest-zcta alongside the full file)
-    if ZCTA_BBOX_INDEX_PATH.exists():
+    # Try the new per-ZIP directory format first
+    index_path = ZCTA_CACHE_DIR / "bbox_index.json.gz"
+    if index_path.exists():
         try:
-            with gzip.open(ZCTA_BBOX_INDEX_PATH, "rt", encoding="utf-8") as fh:
+            with gzip.open(index_path, "rt", encoding="utf-8") as fh:
                 raw: dict[str, list[float]] = json.load(fh)
             index = {
                 zip_code: ZctaBboxEntry(zip_code=zip_code, bounds=(b[0], b[1], b[2], b[3]))
                 for zip_code, b in raw.items()
                 if len(b) == 4
             }
-            logger.info("Loaded ZCTA bbox index from %s: %d entries", ZCTA_BBOX_INDEX_PATH, len(index))
+            logger.info("Loaded ZCTA bbox index from %s: %d entries (~%dKB)",
+                        index_path, len(index), index_path.stat().st_size // 1024)
             return index
         except Exception:
-            logger.warning("Unable to read ZCTA bbox index from %s", ZCTA_BBOX_INDEX_PATH, exc_info=True)
+            logger.warning("Unable to read ZCTA bbox index from %s", index_path, exc_info=True)
 
-    # Fallback: parse the full file to extract bboxes (expensive once, but only happens
-    # if the index file is missing — e.g. cache was generated by the old ingest script)
-    if not ZCTA_CACHE_PATH.exists():
-        return {}
+    # Legacy: try the old single-file bbox index (from earlier version of the fix)
+    legacy_index = ZCTA_CACHE_PATH.with_name("zcta_bbox_index.json.gz")
+    if legacy_index.exists():
+        try:
+            with gzip.open(legacy_index, "rt", encoding="utf-8") as fh:
+                raw = json.load(fh)
+            index = {
+                zip_code: ZctaBboxEntry(zip_code=zip_code, bounds=(b[0], b[1], b[2], b[3]))
+                for zip_code, b in raw.items()
+                if len(b) == 4
+            }
+            logger.info("Loaded legacy ZCTA bbox index from %s: %d entries", legacy_index, len(index))
+            return index
+        except Exception:
+            logger.warning("Unable to read legacy ZCTA bbox index", exc_info=True)
 
-    logger.warning("Bbox index not found at %s — falling back to parsing full ZCTA cache", ZCTA_BBOX_INDEX_PATH)
-    index: dict[str, ZctaBboxEntry] = {}
-    try:
-        with gzip.open(ZCTA_CACHE_PATH, "rt", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except Exception:
-        logger.warning("Unable to read ZCTA cache from %s", ZCTA_CACHE_PATH, exc_info=True)
-        return {}
-
-    features = payload.get("features") if isinstance(payload, dict) else None
-    if not isinstance(features, list):
-        return {}
-
-    for feature in features:
-        props = feature.get("properties") or {}
-        zip_code = str(props.get("zipCode") or props.get("ZCTA5CE20") or props.get("GEOID20") or "").strip()
-        if not zip_code:
-            continue
-        bbox = props.get("bbox")
-        if bbox and len(bbox) == 4:
-            bounds = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
-        else:
-            geometry = feature.get("geometry")
-            if not geometry:
-                continue
-            try:
-                bounds = _bbox_from_coordinates(geometry.get("coordinates", []))
-            except Exception:
-                continue
-            if bounds is None:
-                continue
-        index[zip_code] = ZctaBboxEntry(zip_code=zip_code, bounds=bounds)
-
-    logger.info("Built ZCTA bbox index from full cache: %d entries", len(index))
-    return index
+    logger.warning("No ZCTA bbox index found. Run: python -m pipeline.cli ingest-zcta")
+    return {}
 
 
 def _load_features_for_zips(zip_codes: set[str]) -> dict[str, dict]:
-    """Re-read the full ZCTA cache and extract only the features matching zip_codes.
+    """Load individual per-ZIP GeoJSON files. Each is ~5-15KB gzipped.
 
-    Reads the gzip file from disk each time but only keeps matching features (~20)
-    in memory. Takes <2s on a 4-core machine.
+    For 100 candidates this reads ~1MB total from disk. No giant file parsing.
     """
-    if not zip_codes or not ZCTA_CACHE_PATH.exists():
-        return {}
-
-    try:
-        with gzip.open(ZCTA_CACHE_PATH, "rt", encoding="utf-8") as fh:
-            payload = json.load(fh)
-    except Exception:
-        logger.warning("Unable to re-read ZCTA cache for feature extraction", exc_info=True)
-        return {}
-
-    features = payload.get("features") if isinstance(payload, dict) else None
-    if not isinstance(features, list):
+    if not zip_codes:
         return {}
 
     result: dict[str, dict] = {}
-    for feature in features:
-        props = feature.get("properties") or {}
-        zip_code = str(props.get("zipCode") or props.get("ZCTA5CE20") or props.get("GEOID20") or "").strip()
-        if zip_code in zip_codes:
+    for zip_code in zip_codes:
+        zip_file = ZCTA_CACHE_DIR / f"{zip_code}.json.gz"
+        if not zip_file.exists():
+            continue
+        try:
+            with gzip.open(zip_file, "rt", encoding="utf-8") as fh:
+                feature = json.load(fh)
             result[zip_code] = feature
-            if len(result) == len(zip_codes):
-                break  # Found all we need, stop early
+        except Exception:
+            logger.debug("Unable to read ZCTA file for %s", zip_code)
+            continue
 
+    logger.debug("Loaded %d of %d requested ZIP features from individual files", len(result), len(zip_codes))
     return result
 
 
@@ -250,7 +211,7 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
 
     catchment_bounds = tuple(catchment_geom.bounds)
 
-    # Step 1: Cheap bbox filter against the in-memory index (~5MB, instant)
+    # Step 1: Cheap bbox filter (~5MB index, instant)
     bbox_candidates = [
         entry for entry in index.values()
         if _bbox_overlaps(entry.bounds, catchment_bounds)
@@ -267,11 +228,11 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
             intersection_weights={},
         )
 
-    # Step 2: Load full GeoJSON features ONLY for bbox candidates from disk
+    # Step 2: Load ONLY the candidate ZIP files from disk (~1MB total)
     candidate_zips = {entry.zip_code for entry in bbox_candidates}
     candidate_features = _load_features_for_zips(candidate_zips)
 
-    # Step 3: Create Shapely objects and do intersection only for the ~100 candidates
+    # Step 3: Shapely intersection only for the ~100 candidates
     intersections: list[tuple[str, float]] = []
     for entry in bbox_candidates:
         feature = candidate_features.get(entry.zip_code)
@@ -316,7 +277,7 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
 
 
 # ---------------------------------------------------------------------------
-# Everything below this line is UNCHANGED from the original file.
+# Everything below is UNCHANGED from the original.
 # ---------------------------------------------------------------------------
 
 def _projection_years() -> list[int]:
