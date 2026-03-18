@@ -325,3 +325,49 @@ async def test_dashboard_endpoint_returns_additive_payload(tmp_path, monkeypatch
     assert body["catchment"]["zip_codes"] == ["33901", "33916"]
     assert body["metadata"]["geometry_source"] == "census_zcta_cache"
     assert body["data"]["metric_maps"]["schoolAgePopulation"]["33901"] > 0
+
+
+def test_dashboard_endpoint_requires_zcta_cache(tmp_path, monkeypatch):
+    cache_path = tmp_path / "missing.json.gz"
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_geocode(_address: str):
+        return {
+            "lat": 26.6406,
+            "lon": -81.8723,
+            "matched_address": "123 Main St, Fort Myers, FL 33901",
+            "county_fips": "12071",
+            "state_fips": "12",
+            "county_name": "Lee County",
+            "state_name": "Florida",
+        }
+
+    async def _fake_get_redis():
+        return None
+
+    monkeypatch.setattr(main, "geocode_address", _fake_geocode)
+    monkeypatch.setattr(main, "_get_redis", _fake_get_redis)
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/dashboard",
+        json={
+            "school_name": "St. Example",
+            "address": "123 Main St, Fort Myers, FL 33901",
+            "ministry_type": "schools",
+            "mission_mode": False,
+            "drive_minutes": 20,
+            "geography_mode": "catchment",
+            "gender": "coed",
+            "grade_level": "k12",
+            "weighting_profile": "standard_baseline",
+            "market_context": "suburban",
+            "care_level": "all",
+        },
+    )
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["detail"]["error_code"] == "ZCTA_CACHE_MISSING"
+    assert "ingest-zcta" in body["detail"]["message"]

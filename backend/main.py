@@ -55,7 +55,7 @@ from api.isochrone import (
 from api.school_stage2 import dedupe_year_rows, extract_audit_financials
 from services.dependency_policy import resolve_run_mode, summarize_dependencies, strict_mode_blockers
 from services.analysis_snapshot import snapshot_key, freeze_snapshot, thaw_snapshot
-from services.dashboard_service import build_dashboard_response
+from services.dashboard_service import build_dashboard_response, zcta_cache_status
 
 # Database integration (v2)
 USE_DB = os.getenv("USE_DB", "").lower() in ("1", "true", "yes")
@@ -1065,6 +1065,20 @@ async def dashboard(request: AnalysisRequest):
     run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
     redis = await _get_redis()
     dashboard_cache_key = _dashboard_cache_key(request)
+    zcta_status = zcta_cache_status()
+    if not zcta_status["ready"]:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "ZCTA_CACHE_MISSING",
+                "message": "ZIP boundary cache is not available yet. Run `python -m pipeline.cli ingest-zcta` first.",
+                "detail": {
+                    "path": zcta_status["path"],
+                    "exists": zcta_status["exists"],
+                    "size_bytes": zcta_status["size_bytes"],
+                },
+            },
+        )
     if redis:
         try:
             cached = await redis.get(dashboard_cache_key)

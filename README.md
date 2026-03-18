@@ -185,6 +185,39 @@ AUTH_USERS=admin:admin            # comma-separated username:password pairs
 
 ---
 
+## Dashboard ZIP boundary cache warm-up
+
+The dashboard choropleth depends on a cached Census ZCTA boundary bundle. Treat this as a standard deployment prerequisite.
+
+### Populate the cache
+
+From the backend directory:
+
+```bash
+python -m pipeline.cli ingest-zcta
+```
+
+or as part of the full refresh flow:
+
+```bash
+python -m pipeline.cli ingest-all
+```
+
+### Operational expectations
+
+- Source dataset: Census TIGER/Line ZCTA shapefile (`tl_2024_us_zcta520.zip`), roughly **504 MB** downloaded from the Census site.
+- Expected runtime: typically **a few minutes** in a clean environment, depending on network throughput and disk speed.
+- Cache output: gzipped GeoJSON at `backend/data/zcta_boundaries.json.gz` unless `ZCTA_CACHE_PATH` is overridden.
+- Expected cache footprint: usually **tens of MB**, depending on simplification settings and environment.
+- Refresh cadence: refresh when the dashboard environment is rebuilt and at least **quarterly** after Census/TIGER updates or if the cache is deleted/corrupted.
+
+### Failure mode
+
+- If the cache file is missing or empty, `POST /api/dashboard` now returns a structured `ZCTA_CACHE_MISSING` error telling operators to run `python -m pipeline.cli ingest-zcta`.
+- If the cache exists but a specific catchment resolves to no ZIPs, the frontend shows a clear empty-state message rather than a broken map.
+
+---
+
 ## API reference
 
 ### `GET /api/health`

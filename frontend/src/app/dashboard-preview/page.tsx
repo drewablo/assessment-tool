@@ -6,10 +6,10 @@ export default function DashboardPreviewHome() {
     <main className="min-h-screen bg-[#f7f7fc] px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-[1200px] space-y-8">
         <div className="space-y-3">
-          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-indigo-600">Phase 2 dashboard previews</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.25em] text-indigo-600">Dashboard previews</p>
           <h1 className="text-4xl font-semibold tracking-tight">Module dashboard gallery</h1>
           <p className="max-w-3xl text-base leading-7 text-slate-500">
-            These routes move the project from the shared Phase 1 component library into Phase 2 module-specific dashboards. Each preview reuses the shared components and applies module-specific navigation, metrics, and drilldown copy while the ZIP-data pipeline and live endpoint wiring continue in later phases.
+            Preview the Schools, Elder Care, and Housing market views using the shared dashboard components, module-specific navigation, and ZIP-level drilldowns.
           </p>
         </div>
 

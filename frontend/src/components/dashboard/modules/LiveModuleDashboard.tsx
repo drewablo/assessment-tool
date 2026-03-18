@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import ModuleDashboardView from "@/components/dashboard/modules/ModuleDashboardView";
 import { fetchDashboard } from "@/lib/api";
 import { toDashboardModuleConfig } from "@/lib/dashboard-live";
-import type { AnalysisRequest, DashboardResponse } from "@/lib/types";
+import type { AnalysisRequest, AnalysisResponse, DashboardResponse } from "@/lib/types";
 
 interface Props {
   request: AnalysisRequest;
+  result?: AnalysisResponse | null;
 }
 
-export default function LiveModuleDashboard({ request }: Props) {
+export default function LiveModuleDashboard({ request, result }: Props) {
   const [payload, setPayload] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +44,14 @@ export default function LiveModuleDashboard({ request }: Props) {
     };
   }, [request]);
 
-  const config = useMemo(() => (payload ? toDashboardModuleConfig(payload) : null), [payload]);
+  const config = useMemo(() => (payload ? toDashboardModuleConfig(payload, request, result) : null), [payload, request, result]);
 
   if (loading) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <p className="text-sm font-semibold text-gray-900">Loading live ZIP dashboard…</p>
+        <p className="text-sm font-semibold text-gray-900">Loading market dashboard…</p>
         <p className="mt-2 text-sm text-gray-500">
-          Fetching live ZIP boundaries, drilldowns, and projected time series for this module.
+          Fetching ZIP boundaries, drilldowns, and projected time series for this analysis.
         </p>
       </div>
     );
@@ -59,11 +60,13 @@ export default function LiveModuleDashboard({ request }: Props) {
   if (error) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-        <p className="text-sm font-semibold text-amber-900">Live dashboard unavailable</p>
+        <p className="text-sm font-semibold text-amber-900">Dashboard temporarily unavailable</p>
         <p className="mt-2 text-sm text-amber-800">{error}</p>
-        <p className="mt-3 text-xs text-amber-700">
-          Stage 1 and Stage 2 results remain available above while the dashboard layer degrades gracefully.
-        </p>
+        {error.includes("ingest-zcta") ? (
+          <p className="mt-3 text-xs text-amber-700">
+            Ask your deployment owner to warm the ZIP boundary cache, then reload this analysis.
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -79,9 +82,9 @@ export default function LiveModuleDashboard({ request }: Props) {
   if (payload && payload.catchment.zip_codes.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
-        <p className="font-semibold text-slate-900">No ZIP geometry available for this catchment yet</p>
+        <p className="font-semibold text-slate-900">No ZIP boundaries are available for this catchment yet</p>
         <p className="mt-2">
-          The live dashboard is enabled, but the backend could not load catchment ZIP geometry. This usually means the ZCTA cache has not been populated for the current environment.
+          The analysis completed, but ZIP boundary data is unavailable for this catchment in the current environment.
         </p>
         <p className="mt-2 text-xs text-slate-500">
           Geometry source: {payload.metadata.geometry_source ?? "unknown"}.

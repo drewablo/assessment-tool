@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ChoroplethMap,
   DashboardSidebar,
@@ -11,6 +11,7 @@ import {
   TrendChart,
   ZipDrilldownCard,
 } from "@/components/dashboard";
+import CompetitorTable from "@/components/CompetitorTable";
 import { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
 
 interface Props {
@@ -23,6 +24,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   const [activeTab, setActiveTab] = useState(config.tabs[0]?.key ?? "");
   const [metricKey, setMetricKey] = useState(config.metricOptions[0]?.key ?? "");
   const [selectedZip, setSelectedZip] = useState(Object.keys(config.zipDrilldowns)[0] ?? "");
+  const drilldownRef = useRef<HTMLDivElement>(null);
 
   const selectedMetric = useMemo(
     () => config.metricOptions.find((item) => item.key === metricKey) ?? config.metricOptions[0],
@@ -30,6 +32,9 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   );
 
   const zipData = selectedZip ? config.zipDrilldowns[selectedZip] : undefined;
+  const showCompetitorTable = ["competitors", "market_landscape"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
+
+  const Wrapper = embedded ? "div" : "main";
 
   const Wrapper = embedded ? "div" : "main";
 
@@ -51,12 +56,13 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
 
         <ParameterBar
           driveTimeMinutes={config.driveTimeMinutes}
-          address="15680 Pine Ridge Road, Fort Myers, FL"
+          address={config.address ?? "15680 Pine Ridge Road, Fort Myers, FL"}
           primaryLabel={config.primaryLabel}
           primaryValue={config.primaryValue}
           secondaryLabel={config.secondaryLabel}
           secondaryValue={config.secondaryValue}
           zipCount={config.zipCount}
+          parameterFields={config.parameterFields}
         />
 
         <div className="grid gap-4 md:grid-cols-3">
@@ -94,7 +100,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
             <div className="grid gap-6 2xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,0.8fr)]">
               <ChoroplethMap
                 title={`${selectedMetric?.label ?? "Market"} by ZIP Code`}
-                subtitle="Shared ZIP-level choropleth component reused across all Phase 2 module dashboards."
+                subtitle="Select a ZIP to focus the drilldown card and compare local market conditions across the catchment."
                 featureCollection={config.featureCollection}
                 metric={selectedMetric}
                 availableMetrics={config.metricOptions}
@@ -103,13 +109,18 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
                 onZipSelect={(zipCode) => {
                   if (zipCode in config.zipDrilldowns) {
                     setSelectedZip(zipCode);
+                    requestAnimationFrame(() => {
+                      drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    });
                   }
                 }}
                 fileBaseName={`${config.slug}-choropleth`}
               />
 
               {zipData ? (
-                <ZipDrilldownCard data={zipData} defaultOpen />
+                <div ref={drilldownRef}>
+                  <ZipDrilldownCard data={zipData} defaultOpen />
+                </div>
               ) : (
                 <div className="rounded-[28px] border border-dashed border-slate-300 bg-white p-8 text-sm text-slate-500 shadow-sm">
                   Select a ZIP on the map to open the drilldown card.
@@ -127,6 +138,16 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
               comparisonColor="#16a34a"
               fileBaseName={`${config.slug}-distribution`}
             />
+
+            {showCompetitorTable && config.competitorCounts ? (
+              <CompetitorTable
+                schools={config.competitors ?? []}
+                catholicCount={config.competitorCounts.catholicCount}
+                totalPrivateCount={config.competitorCounts.totalPrivateCount}
+                radiusMiles={config.competitorCounts.radiusMiles}
+                ministryType={config.slug === "elder-care" ? "elder_care" : config.slug}
+              />
+            ) : null}
           </section>
         </div>
       </div>

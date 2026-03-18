@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 ZCTA_SOURCE_URL = os.getenv(
     "ZCTA_SOURCE_URL",
-    "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_zcta520_500k.zip",
+    "https://www2.census.gov/geo/tiger/TIGER2024/ZCTA520/tl_2024_us_zcta520.zip",
 )
 ZCTA_CACHE_PATH = Path(os.getenv("ZCTA_CACHE_PATH", Path(__file__).resolve().parents[1] / "data" / "zcta_boundaries.json.gz"))
 _SIMPLIFY_DECIMALS = int(os.getenv("ZCTA_SIMPLIFY_DECIMALS", "5"))

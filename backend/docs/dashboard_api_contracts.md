@@ -1,6 +1,6 @@
-# Dashboard API Contracts (Phase 1 scaffold)
+# Dashboard API Contracts
 
-This document defines the target response envelope for the new interactive dashboard endpoints introduced after Phase 0 reconnaissance.
+This document defines the dashboard response envelope and the metric/property naming conventions used by the interactive market dashboard.
 
 ## Shared response envelope
 
@@ -107,4 +107,31 @@ interface HousingDashboardData {
 - Projected values must be visually differentiated in the frontend.
 - Existing `AnalysisResponse` remains intact for the current assessment flow; these contracts are additive.
 - Live implementation note: `/api/dashboard` now returns an additive dashboard payload with `zip_codes`, ZIP `FeatureCollection`, per-ZIP metric maps, drilldowns, module-specific series metadata, and projection/freshness metadata.
-- Geometry payloads are intended to come from the cached Census ZCTA bundle produced by `python -m pipeline.cli ingest-zcta`; the API reports `geometry_source` so the frontend can distinguish cached Census geometry from synthetic fallback shapes during rollout.
+- Geometry payloads are intended to come from the cached Census ZCTA bundle produced by `python -m pipeline.cli ingest-zcta`; the API reports `geometry_source`, and the endpoint now returns a structured `ZCTA_CACHE_MISSING` error if the cache is absent or empty.
+
+## Per-ZIP metric keys used in `FeatureCollection.properties`
+
+These keys are attached directly to each ZIP feature so the frontend choropleth can switch metrics generically.
+
+### Schools
+
+- `schoolAgePopulation`
+- `familiesWithChildren`
+- `medianFamilyIncome`
+- `competitorCount`
+
+### Elder Care
+
+- `seniors65Plus`
+- `seniors75Plus`
+- `medianSeniorIncome`
+- `facilityCount`
+
+### Housing
+
+- `totalPopulation`
+- `costBurdenedHouseholds`
+- `costBurdenRate`
+- `renterHouseholds`
+- `hudEligibleHouseholds`
+- `medianHouseholdIncome`

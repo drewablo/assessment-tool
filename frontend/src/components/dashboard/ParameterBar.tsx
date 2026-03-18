@@ -1,6 +1,5 @@
 "use client";
 
-import { Search } from "lucide-react";
 import { ParameterBarField } from "@/lib/dashboard";
 
 interface Props {
@@ -11,7 +10,7 @@ interface Props {
   zipCount: number;
   secondaryLabel?: string;
   secondaryValue?: string;
-  onRun?: () => void;
+  parameterFields?: ParameterBarField[];
 }
 
 function StatChip({ label, value }: ParameterBarField) {
@@ -31,14 +30,23 @@ export default function ParameterBar({
   zipCount,
   secondaryLabel,
   secondaryValue,
-  onRun,
+  parameterFields = [],
 }: Props) {
+  const summaryFields: ParameterBarField[] = [
+    { label: "Drive time", value: `${driveTimeMinutes} minutes` },
+    { label: primaryLabel, value: primaryValue },
+    { label: "ZIPs", value: `${zipCount} total ZIPs` },
+    ...(secondaryLabel && secondaryValue ? [{ label: secondaryLabel, value: secondaryValue }] : []),
+    ...parameterFields,
+  ];
+
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white/95 p-6 shadow-sm backdrop-blur">
-      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Current analysis</p>
           <div className="flex flex-wrap items-center gap-3 text-[30px] font-semibold tracking-tight text-slate-900">
-            <span>Show me data within a</span>
+            <span>Market view within a</span>
             <span className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xl font-medium text-slate-700">
               {driveTimeMinutes}-minute
             </span>
@@ -54,23 +62,16 @@ export default function ParameterBar({
             </span>
             <span>{primaryLabel}.</span>
           </div>
+          <p className="text-sm text-slate-500">
+            Dashboard settings are read-only here. Return to the analysis form to change assumptions and rerun.
+          </p>
         </div>
-
-        <button
-          type="button"
-          onClick={onRun}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-        >
-          <Search className="w-4 h-4" />
-          Show me the trends
-        </button>
       </div>
 
       <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-5">
-        <StatChip label="Drive time" value={`${driveTimeMinutes} minutes`} />
-        <StatChip label="Metric" value={primaryValue} />
-        <StatChip label="ZIPs in view" value={zipCount} />
-        {secondaryLabel && secondaryValue ? <StatChip label={secondaryLabel} value={secondaryValue} /> : null}
+        {summaryFields.map((field) => (
+          <StatChip key={`${field.label}-${field.value}`} label={field.label} value={field.value} />
+        ))}
       </div>
     </section>
   );

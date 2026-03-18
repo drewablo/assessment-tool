@@ -1,9 +1,39 @@
 import type { FeatureCollection } from "geojson";
 import type { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
+import type { ParameterBarField } from "@/lib/dashboard";
 import type { DashboardTimeSeriesPoint } from "@/lib/dashboard";
-import type { DashboardResponse } from "@/lib/types";
+import type { AnalysisRequest, AnalysisResponse, DashboardResponse } from "@/lib/types";
 
-export function toDashboardModuleConfig(payload: DashboardResponse): DashboardPreviewModule {
+function requestFields(request: AnalysisRequest): ParameterBarField[] {
+  const shared: ParameterBarField[] = [{ label: "Market", value: request.market_context }];
+
+  if (request.ministry_type === "schools") {
+    return [
+      { label: "Grades", value: request.grade_level.replace("_", " ").toUpperCase() },
+      { label: "Gender", value: request.gender },
+      { label: "Weighting", value: request.weighting_profile.replaceAll("_", " ") },
+      ...shared,
+    ];
+  }
+
+  if (request.ministry_type === "elder_care") {
+    return [
+      { label: "Care level", value: request.care_level.replaceAll("_", " ") },
+      ...shared,
+    ];
+  }
+
+  return [
+    { label: "Target", value: (request.housing_target_population ?? "all_ages").replaceAll("_", " ") },
+    ...shared,
+  ];
+}
+
+export function toDashboardModuleConfig(
+  payload: DashboardResponse,
+  request: AnalysisRequest,
+  analysisResult?: AnalysisResponse | null,
+): DashboardPreviewModule {
   const trendYears = Array.from(
     new Set(
       Object.values(payload.data.time_series)
@@ -36,12 +66,14 @@ export function toDashboardModuleConfig(payload: DashboardResponse): DashboardPr
     eyebrow: payload.data.eyebrow,
     title: payload.data.title,
     description: `${payload.data.description} ${payload.metadata.projection_label ?? ""}`.trim(),
+    address: payload.catchment.center.address,
     primaryLabel: payload.data.primary_label,
     primaryValue: payload.data.primary_value,
     secondaryLabel: payload.data.secondary_label,
     secondaryValue: payload.data.secondary_value,
     driveTimeMinutes: payload.catchment.drive_time_minutes,
     zipCount: payload.catchment.zip_codes.length,
+    parameterFields: requestFields(request),
     sidebarItems: payload.data.sidebar_items.map((item) => ({
       key: item.key,
       title: item.title,
@@ -87,5 +119,14 @@ export function toDashboardModuleConfig(payload: DashboardResponse): DashboardPr
       ]),
     ),
     highlightCards: payload.data.highlight_cards,
+    competitors: analysisResult?.competitor_schools ?? [],
+    competitorCounts: {
+      catholicCount: analysisResult?.catholic_school_count ?? 0,
+      totalPrivateCount:
+        analysisResult?.total_private_school_count ??
+        analysisResult?.competitor_schools.length ??
+        0,
+      radiusMiles: analysisResult?.radius_miles ?? 0,
+    },
   };
 }
