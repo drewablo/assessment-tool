@@ -138,9 +138,14 @@ export default function HomePage() {
               <p className="text-xs text-gray-400">Schools · Housing · Elder Care</p>
             </div>
           </div>
-          <Link href="/intelligence" className="text-xs sm:text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
-            Intelligence Console
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard-preview" className="text-xs sm:text-sm px-3 py-2 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
+              Dashboard Preview
+            </Link>
+            <Link href="/intelligence" className="text-xs sm:text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
+              Intelligence Console
+            </Link>
+          </div>
         </div>
       </header>
 
