@@ -92,6 +92,7 @@ async def ingest_zcta_boundaries(*, source_url: str = ZCTA_SOURCE_URL, zip_filte
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         count = 0
+        bbox_index: dict[str, list[float]] = {}
 
         with gzip.open(destination, "wt", encoding="utf-8") as fh:
             fh.write('{"type":"FeatureCollection","features":[')
@@ -108,14 +109,26 @@ async def ingest_zcta_boundaries(*, source_url: str = ZCTA_SOURCE_URL, zip_filte
                 if not first:
                     fh.write(",")
                 json.dump(feature, fh, separators=(",", ":"))
+
+                # Collect bbox for the index
+                bbox = feature.get("properties", {}).get("bbox")
+                if bbox:
+                    bbox_index[zip_code] = bbox
+
                 first = False
                 count += 1
                 if count % 5000 == 0:
                     logger.info("Processed %d ZCTA features...", count)
             fh.write("]}")
 
+        # Write a separate lightweight bbox index (~200KB vs ~100MB for the full file)
+        index_path = destination.with_name("zcta_bbox_index.json.gz")
+        with gzip.open(index_path, "wt", encoding="utf-8") as fh:
+            json.dump(bbox_index, fh, separators=(",", ":"))
+        logger.info("Wrote bbox index with %d entries at %s", len(bbox_index), index_path)
+
         logger.info("Cached %d ZCTA boundaries at %s", count, destination)
-        return {"features": count, "path": str(destination)}
+        return {"features": count, "path": str(destination), "index_path": str(index_path)}
 
     finally:
         # Clean up temp files
