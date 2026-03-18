@@ -40,6 +40,7 @@ from models.schemas import (
     PortfolioWorkspaceUpdateRequest,
     PortfolioCompareSnapshot,
     SchoolAuditExtractionResponse,
+    DashboardResponse,
 )
 from api.geocoder import GeocoderServiceError, geocode_address
 from api.census import get_demographics
@@ -54,6 +55,7 @@ from api.isochrone import (
 from api.school_stage2 import dedupe_year_rows, extract_audit_financials
 from services.dependency_policy import resolve_run_mode, summarize_dependencies, strict_mode_blockers
 from services.analysis_snapshot import snapshot_key, freeze_snapshot, thaw_snapshot
+from services.dashboard_service import build_dashboard_response
 
 # Database integration (v2)
 USE_DB = os.getenv("USE_DB", "").lower() in ("1", "true", "yes")
@@ -62,6 +64,7 @@ CACHE_TTL = int(os.getenv("ANALYSIS_CACHE_TTL", "86400"))  # 24 hours default
 DEFAULT_RUN_MODE = os.getenv("ANALYSIS_RUN_MODE", "db_with_fallback")
 SNAPSHOT_TTL = int(os.getenv("ANALYSIS_SNAPSHOT_TTL", "86400"))
 CACHE_SCHEMA_VERSION = os.getenv("ANALYSIS_CACHE_SCHEMA_VERSION", "2026-03-senior-metrics-v2")
+DASHBOARD_CACHE_SCHEMA_VERSION = os.getenv("DASHBOARD_CACHE_SCHEMA_VERSION", "2026-03-dashboard-v1")
 
 # Global Redis connection state
 _redis = None
@@ -721,6 +724,10 @@ def _cache_key(request: AnalysisRequest) -> str:
     return f"analysis:{request.ministry_type}:{digest}"
 
 
+def _dashboard_cache_key(request: AnalysisRequest) -> str:
+    return f"dashboard:{DASHBOARD_CACHE_SCHEMA_VERSION}:{_cache_key(request)}"
+
+
 def _runner_up_pathways(primary: str) -> list[str]:
     order = ["continue", "transform", "partner", "close"]
     return [p for p in order if p != primary][:2]
@@ -1050,6 +1057,64 @@ async def analyze(request: AnalysisRequest):
             logger.warning("Redis set failed for key %s", cache_key, exc_info=True)
 
     return result
+
+
+@app.post("/api/dashboard", response_model=DashboardResponse)
+async def dashboard(request: AnalysisRequest):
+    """Return additive ZIP-level dashboard payloads without replacing the current analysis contract."""
+    run_mode = resolve_run_mode(request.run_mode if hasattr(request, "run_mode") else None, USE_DB)
+    redis = await _get_redis()
+    dashboard_cache_key = _dashboard_cache_key(request)
+    if redis:
+        try:
+            cached = await redis.get(dashboard_cache_key)
+            if cached:
+                return DashboardResponse.model_validate_json(cached)
+        except Exception:
+            _mark_redis_failure()
+            logger.warning("Redis get failed for dashboard key %s", dashboard_cache_key, exc_info=True)
+
+    try:
+        location = await geocode_address(request.address)
+    except GeocoderServiceError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "GEOCODER_UNAVAILABLE",
+                "message": "Address geocoding service is currently unavailable.",
+                "detail": str(exc),
+            },
+        ) from exc
+    if not location:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_code": "GEOCODE_FAILED",
+                "message": "Could not geocode the provided address.",
+                "detail": "Please verify the address is a valid US street address including city and state.",
+            },
+        )
+
+    result = thaw_snapshot(await redis.get(snapshot_key(request))) if redis else None
+    if result is None:
+        analysis_result, context = await _run_analysis(location, request, run_mode=run_mode)
+        result = _apply_reliability_metadata(
+            analysis_result,
+            run_mode=run_mode,
+            dependency_counts=None,
+            fallback_notes=context.get("fallback_notes", []),
+            strict_blockers=[],
+        )
+        result = await _enrich_analysis_result(result, request)
+
+    payload = build_dashboard_response(request=request, result=result, location=location)
+    if redis:
+        try:
+            await redis.setex(dashboard_cache_key, CACHE_TTL, payload.model_dump_json())
+        except Exception:
+            _mark_redis_failure()
+            logger.warning("Redis set failed for dashboard key %s", dashboard_cache_key, exc_info=True)
+    return payload
 
 
 
