@@ -10,6 +10,7 @@ Usage:
     python -m pipeline.cli ingest-hud-tenant
     python -m pipeline.cli ingest-hud-qct
     python -m pipeline.cli ingest-hud-section202 # Ingest HUD Section 202 data
+    python -m pipeline.cli ingest-zcta          # Cache Census ZCTA boundaries for dashboard maps
     python -m pipeline.cli ingest-all        # Run all ingestion pipelines
     python -m pipeline.cli ingest-hud-foundation --source-family ... --file ... --dataset-year ...
     python -m pipeline.cli status            # Show pipeline run status
@@ -102,6 +103,14 @@ async def cmd_ingest_hud_section202():
     from pipeline.ingest_hud_section202 import _ingest_hud_section202_async
     print("Ingesting HUD Section 202 senior housing data...")
     result = await _ingest_hud_section202_async()
+    print(f"Done: {result}")
+
+
+async def cmd_ingest_zcta(args):
+    from pipeline.ingest_zcta import ingest_zcta_boundaries
+
+    zip_filter = args.zip_codes.split(",") if args.zip_codes else None
+    result = await ingest_zcta_boundaries(zip_filter=zip_filter)
     print(f"Done: {result}")
 
 
@@ -221,6 +230,8 @@ def main():
     sub.add_parser("ingest-hud-tenant", help="Ingest HUD LIHTC tenant workbook")
     sub.add_parser("ingest-hud-qct", help="Ingest HUD QCT/DDA workbook")
     sub.add_parser("ingest-hud-section202", help="Ingest HUD Section 202 senior housing data")
+    zcta_parser = sub.add_parser("ingest-zcta", help="Cache Census ZCTA boundaries for dashboard maps")
+    zcta_parser.add_argument("--zip-codes", default=None, help="Optional comma-separated ZIP/ZCTA list to cache")
 
     all_parser = sub.add_parser("ingest-all", help="Run all ingestion pipelines")
     all_parser.add_argument("--vintage", default="2022")
@@ -262,6 +273,8 @@ def main():
         asyncio.run(cmd_ingest_hud_qct())
     elif args.command == "ingest-hud-section202":
         asyncio.run(cmd_ingest_hud_section202())
+    elif args.command == "ingest-zcta":
+        asyncio.run(cmd_ingest_zcta(args))
     elif args.command == "status":
         asyncio.run(cmd_status())
     elif args.command == "ingest-hud-foundation":

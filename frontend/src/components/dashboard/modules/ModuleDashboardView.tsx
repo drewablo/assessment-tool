@@ -15,9 +15,10 @@ import { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
 
 interface Props {
   config: DashboardPreviewModule;
+  embedded?: boolean;
 }
 
-export default function ModuleDashboardView({ config }: Props) {
+export default function ModuleDashboardView({ config, embedded = false }: Props) {
   const [activeSidebar, setActiveSidebar] = useState(config.sidebarItems[0]?.key ?? "");
   const [activeTab, setActiveTab] = useState(config.tabs[0]?.key ?? "");
   const [metricKey, setMetricKey] = useState(config.metricOptions[0]?.key ?? "");
@@ -30,18 +31,22 @@ export default function ModuleDashboardView({ config }: Props) {
 
   const zipData = selectedZip ? config.zipDrilldowns[selectedZip] : undefined;
 
+  const Wrapper = embedded ? "div" : "main";
+
   return (
-    <main className="min-h-screen bg-[#f7f7fc] px-6 py-10 text-slate-900">
-      <div className="mx-auto max-w-[1440px] space-y-8">
+    <Wrapper className={`${embedded ? "rounded-[32px] bg-[#f7f7fc] p-4 sm:p-6" : "min-h-screen bg-[#f7f7fc] px-6 py-10"} text-slate-900`}>
+      <div className={`mx-auto ${embedded ? "max-w-full" : "max-w-[1440px]"} space-y-8`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
             <p className="text-sm font-semibold uppercase tracking-[0.25em] text-indigo-600">{config.eyebrow}</p>
             <h1 className="text-4xl font-semibold tracking-tight">{config.title}</h1>
             <p className="max-w-3xl text-base leading-7 text-slate-500">{config.description}</p>
           </div>
-          <Link href="/dashboard-preview" className="text-sm font-medium text-indigo-700 hover:text-indigo-900">
-            Back to dashboard module gallery
-          </Link>
+          {!embedded && (
+            <Link href="/dashboard-preview" className="text-sm font-medium text-indigo-700 hover:text-indigo-900">
+              Back to dashboard module gallery
+            </Link>
+          )}
         </div>
 
         <ParameterBar
@@ -125,6 +130,6 @@ export default function ModuleDashboardView({ config }: Props) {
           </section>
         </div>
       </div>
-    </main>
+    </Wrapper>
   );
 }
