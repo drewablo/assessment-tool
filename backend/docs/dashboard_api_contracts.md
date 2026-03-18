@@ -106,3 +106,5 @@ interface HousingDashboardData {
 - `geojson` is intended for ZIP/ZCTA boundaries rather than tract boundaries.
 - Projected values must be visually differentiated in the frontend.
 - Existing `AnalysisResponse` remains intact for the current assessment flow; these contracts are additive.
+- Live implementation note: `/api/dashboard` now returns an additive dashboard payload with `zip_codes`, ZIP `FeatureCollection`, per-ZIP metric maps, drilldowns, module-specific series metadata, and projection/freshness metadata.
+- Geometry payloads are intended to come from the cached Census ZCTA bundle produced by `python -m pipeline.cli ingest-zcta`; the API reports `geometry_source` so the frontend can distinguish cached Census geometry from synthetic fallback shapes during rollout.
