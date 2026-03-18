@@ -357,6 +357,118 @@ export interface DataFreshnessMetadata {
   sources: DataFreshnessSource[];
 }
 
+export interface DashboardMetricOption {
+  key: string;
+  label: string;
+  format: "number" | "currency" | "percent";
+}
+
+export interface DashboardSeriesDescriptor {
+  key: string;
+  label: string;
+  color: string;
+  format: "number" | "currency" | "percent";
+}
+
+export interface DashboardDistributionBucketResponse {
+  bucket: string;
+  primary: number;
+  comparison?: number | null;
+}
+
+export interface DashboardDrilldownMetricResponse {
+  label: string;
+  current: number;
+  projected: number;
+  format: "number" | "currency" | "percent";
+  invert_change: boolean;
+}
+
+export interface DashboardZipDrilldownResponse {
+  zip_code: string;
+  place_label?: string | null;
+  summary: string;
+  current_year: number;
+  projected_year: number;
+  metrics: DashboardDrilldownMetricResponse[];
+  distribution: DashboardDistributionBucketResponse[];
+}
+
+export interface DashboardSidebarItemResponse {
+  key: string;
+  title: string;
+  description: string;
+  badge?: string | null;
+}
+
+export interface DashboardTabItemResponse {
+  key: string;
+  label: string;
+}
+
+export interface DashboardViewCardResponse {
+  label: string;
+  value: string;
+  detail: string;
+}
+
+export interface DashboardTimeSeriesPointResponse {
+  year: number;
+  value: number;
+  projected: boolean;
+  lower_bound?: number | null;
+  upper_bound?: number | null;
+  label?: string | null;
+}
+
+export interface DashboardModuleDataResponse {
+  slug: string;
+  label: string;
+  eyebrow: string;
+  title: string;
+  description: string;
+  primary_label: string;
+  primary_value: string;
+  secondary_label: string;
+  secondary_value: string;
+  sidebar_items: DashboardSidebarItemResponse[];
+  tabs: DashboardTabItemResponse[];
+  metric_options: DashboardMetricOption[];
+  metric_maps: Record<string, Record<string, number>>;
+  trend_title: string;
+  trend_subtitle: string;
+  trend_series: DashboardSeriesDescriptor[];
+  time_series: Record<string, DashboardTimeSeriesPointResponse[]>;
+  distribution_title: string;
+  distribution_subtitle: string;
+  distribution: DashboardDistributionBucketResponse[];
+  drilldowns: Record<string, DashboardZipDrilldownResponse>;
+  highlight_cards: DashboardViewCardResponse[];
+}
+
+export interface DashboardCatchmentResponse {
+  center: { lat: number; lng: number; address: string };
+  drive_time_minutes: number;
+  zip_codes: string[];
+  geojson: object;
+}
+
+export interface DashboardMetadataResponse {
+  data_year: number;
+  projection_years: number[];
+  last_updated: string;
+  confidence_band: "high" | "medium" | "low";
+  projection_label?: string | null;
+  geometry_source?: string | null;
+  freshness?: Record<string, unknown> | null;
+}
+
+export interface DashboardResponse {
+  catchment: DashboardCatchmentResponse;
+  data: DashboardModuleDataResponse;
+  metadata: DashboardMetadataResponse;
+}
+
 export interface PortfolioCandidateLocation {
   name: string;
   address: string;

@@ -20,6 +20,7 @@ import { useState } from "react";
 const SchoolMap = dynamic(() => import("./SchoolMap"), { ssr: false });
 const WhatIfSimulator = dynamic(() => import("./WhatIfSimulator"), { ssr: false });
 const Stage2Dashboard = dynamic(() => import("./Stage2Dashboard"), { ssr: false });
+const LiveModuleDashboard = dynamic(() => import("./dashboard/modules/LiveModuleDashboard"), { ssr: false });
 
 const weightingProfileLabels: Record<string, string> = {
   standard_baseline: "Standard baseline",
@@ -500,6 +501,24 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
           )}
         </div>
       )}
+
+      <details className="rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 sm:p-5">
+        <summary className="cursor-pointer list-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Rollout path</p>
+              <h3 className="text-lg font-semibold text-indigo-950">Live ZIP dashboard for this analysis</h3>
+              <p className="mt-1 text-sm text-indigo-900/80">
+                Stage 1 and Stage 2 results remain available above while the new dashboard layer is introduced below as an additive view.
+              </p>
+            </div>
+            <span className="text-sm font-medium text-indigo-700">Expand live dashboard</span>
+          </div>
+        </summary>
+        <div className="mt-5">
+          <LiveModuleDashboard request={request} />
+        </div>
+      </details>
 
       {/* Data notes */}
       {result.data_notes.length > 0 && (
