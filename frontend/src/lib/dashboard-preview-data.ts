@@ -6,8 +6,10 @@ import {
   DashboardTabItem,
   DashboardDistributionBucket,
   DashboardTimeSeriesPoint,
+  ParameterBarField,
   ZipDrilldownData,
 } from "@/lib/dashboard";
+import type { CompetitorSchool } from "@/lib/types";
 
 export type DashboardModuleSlug = "schools" | "elder-care" | "housing";
 
@@ -36,6 +38,14 @@ export interface DashboardPreviewModule {
   distributionData: DashboardDistributionBucket[];
   zipDrilldowns: Record<string, ZipDrilldownData>;
   highlightCards: Array<{ label: string; value: string; detail: string }>;
+  address?: string;
+  parameterFields?: ParameterBarField[];
+  competitors?: CompetitorSchool[];
+  competitorCounts?: {
+    catholicCount: number;
+    totalPrivateCount: number;
+    radiusMiles: number;
+  };
 }
 
 const sharedTabs: DashboardTabItem[] = [
@@ -49,7 +59,7 @@ const sharedTabs: DashboardTabItem[] = [
 const schoolsConfig: DashboardPreviewModule = {
   slug: "schools",
   label: "Schools",
-  eyebrow: "Phase 2 · Schools module",
+  eyebrow: "Schools dashboard",
   title: "School Market View",
   description: "A schools-focused dashboard shell for market overview, affordability, student body, enrollment, and competitor review.",
   primaryLabel: "tuition",
@@ -178,7 +188,7 @@ const schoolsConfig: DashboardPreviewModule = {
 const elderCareConfig: DashboardPreviewModule = {
   slug: "elder-care",
   label: "Elder Care",
-  eyebrow: "Phase 2 · Elder care module",
+  eyebrow: "Elder care dashboard",
   title: "Elder Care Market View",
   description: "A care-market dashboard shell for community profile, facilities, partnership viability, financial context, and projections.",
   primaryLabel: "care type",
@@ -301,7 +311,7 @@ const elderCareConfig: DashboardPreviewModule = {
 const housingConfig: DashboardPreviewModule = {
   slug: "housing",
   label: "Low-Income Housing",
-  eyebrow: "Phase 2 · Housing module",
+  eyebrow: "Housing dashboard",
   title: "Affordable Housing Market View",
   description: "A housing-focused dashboard shell for community profile, need assessment, existing resources, and demographic trends.",
   primaryLabel: "AMI threshold",

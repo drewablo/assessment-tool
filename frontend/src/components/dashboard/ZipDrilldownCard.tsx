@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import ChartActionBar from "./ChartActionBar";
 import {
@@ -34,7 +34,7 @@ function changeBadge(current: number, projected: number, invertChange = false) {
   };
 }
 
-export default function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
+function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -120,3 +120,5 @@ export default function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
     </div>
   );
 }
+
+export default memo(ZipDrilldownCard);

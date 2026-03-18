@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { memo, useMemo, useRef } from "react";
 import { Fragment } from "react";
 import {
   CartesianGrid,
@@ -23,7 +23,7 @@ interface Props {
   fileBaseName?: string;
 }
 
-export default function TrendChart({ title, subtitle, data, series, fileBaseName = "trend-chart" }: Props) {
+function TrendChart({ title, subtitle, data, series, fileBaseName = "trend-chart" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   const chartData = useMemo(() => {
@@ -101,3 +101,5 @@ export default function TrendChart({ title, subtitle, data, series, fileBaseName
     </div>
   );
 }
+
+export default memo(TrendChart);
