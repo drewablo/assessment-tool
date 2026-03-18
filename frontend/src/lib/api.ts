@@ -1,4 +1,4 @@
-import { AnalysisRequest, AnalysisResponse, AnalysisHistoryRecord, BoardReportPack, BenchmarkNarrative, DataFreshnessMetadata, OpportunityRecord, PipelineStatusResponse, PortfolioWorkspaceResponse, ScoringWeightsResponse, SchoolAuditExtractionResponse } from "./types";
+import { AnalysisRequest, AnalysisResponse, AnalysisHistoryRecord, BoardReportPack, BenchmarkNarrative, DashboardResponse, DataFreshnessMetadata, OpportunityRecord, PipelineStatusResponse, PortfolioWorkspaceResponse, ScoringWeightsResponse, SchoolAuditExtractionResponse } from "./types";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
@@ -34,6 +34,20 @@ export async function runAnalysis(request: AnalysisRequest): Promise<AnalysisRes
 
   if (!res.ok) {
     throw await parseApiError(res, `API error: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function fetchDashboard(request: AnalysisRequest): Promise<DashboardResponse> {
+  const res = await fetch(`${API_URL}/api/dashboard`, {
+    method: "POST",
+    headers: apiHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    throw await parseApiError(res, `Dashboard API error: ${res.status}`);
   }
 
   return res.json();

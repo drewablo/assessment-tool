@@ -464,6 +464,118 @@ class PortfolioWorkspaceResponse(BaseModel):
     compare_snapshots: List[PortfolioCompareSnapshot] = Field(default_factory=list)
 
 
+class DashboardTimeSeriesPoint(BaseModel):
+    year: int
+    value: float
+    projected: bool = False
+    lower_bound: Optional[float] = None
+    upper_bound: Optional[float] = None
+    label: Optional[str] = None
+
+
+class DashboardSeriesDescriptor(BaseModel):
+    key: str
+    label: str
+    color: str
+    format: Literal["number", "currency", "percent"] = "number"
+
+
+class DashboardDistributionBucket(BaseModel):
+    bucket: str
+    primary: float
+    comparison: Optional[float] = None
+
+
+class DashboardDrilldownMetric(BaseModel):
+    label: str
+    current: float
+    projected: float
+    format: Literal["number", "currency", "percent"] = "number"
+    invert_change: bool = False
+
+
+class DashboardZipDrilldown(BaseModel):
+    zip_code: str
+    place_label: Optional[str] = None
+    summary: str
+    current_year: int
+    projected_year: int
+    metrics: List[DashboardDrilldownMetric] = Field(default_factory=list)
+    distribution: List[DashboardDistributionBucket] = Field(default_factory=list)
+
+
+class DashboardMetricOption(BaseModel):
+    key: str
+    label: str
+    format: Literal["number", "currency", "percent"] = "number"
+
+
+class DashboardSidebarItem(BaseModel):
+    key: str
+    title: str
+    description: str
+    badge: Optional[str] = None
+
+
+class DashboardTabItem(BaseModel):
+    key: str
+    label: str
+
+
+class DashboardViewCard(BaseModel):
+    label: str
+    value: str
+    detail: str
+
+
+class DashboardModuleData(BaseModel):
+    slug: str
+    label: str
+    eyebrow: str
+    title: str
+    description: str
+    primary_label: str
+    primary_value: str
+    secondary_label: str
+    secondary_value: str
+    sidebar_items: List[DashboardSidebarItem] = Field(default_factory=list)
+    tabs: List[DashboardTabItem] = Field(default_factory=list)
+    metric_options: List[DashboardMetricOption] = Field(default_factory=list)
+    metric_maps: Dict[str, Dict[str, float]] = Field(default_factory=dict)
+    trend_title: str
+    trend_subtitle: str
+    trend_series: List[DashboardSeriesDescriptor] = Field(default_factory=list)
+    time_series: Dict[str, List[DashboardTimeSeriesPoint]] = Field(default_factory=dict)
+    distribution_title: str
+    distribution_subtitle: str
+    distribution: List[DashboardDistributionBucket] = Field(default_factory=list)
+    drilldowns: Dict[str, DashboardZipDrilldown] = Field(default_factory=dict)
+    highlight_cards: List[DashboardViewCard] = Field(default_factory=list)
+
+
+class DashboardCatchment(BaseModel):
+    center: Dict[str, float | str]
+    drive_time_minutes: int
+    zip_codes: List[str] = Field(default_factory=list)
+    geojson: Dict[str, object]
+
+
+class DashboardMetadata(BaseModel):
+    data_year: int
+    projection_years: List[int] = Field(default_factory=list)
+    last_updated: str
+    confidence_band: Literal["high", "medium", "low"] = "medium"
+    projection_label: Optional[str] = None
+    geometry_source: Optional[str] = None
+    freshness: Optional[Dict[str, object]] = None
+
+
+class DashboardResponse(BaseModel):
+    catchment: DashboardCatchment
+    data: DashboardModuleData
+    metadata: DashboardMetadata
+
+
 class AnalysisResponse(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
