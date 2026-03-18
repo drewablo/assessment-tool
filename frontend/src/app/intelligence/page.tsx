@@ -101,6 +101,9 @@ export default function IntelligencePage() {
             <p className="text-sm text-gray-500">Operational health, discovery opportunities, and scoring methodology.</p>
           </div>
           <div className="flex gap-2">
+            <Link href="/dashboard-preview" className="px-3 py-2 text-sm rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700">
+              Dashboard Preview
+            </Link>
             <button onClick={() => loadConsole()} className="px-3 py-2 text-sm rounded-lg bg-gray-900 text-white">Refresh</button>
             <Link href="/" className="px-3 py-2 text-sm rounded-lg bg-white border border-gray-200 text-gray-700">Back to Analysis</Link>
           </div>
