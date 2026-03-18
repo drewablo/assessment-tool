@@ -17,12 +17,20 @@ class ProjectionPoint:
     year: int
     value: float
     projected: bool
+    lower_bound: float | None = None
+    upper_bound: float | None = None
 
 
 @dataclass(frozen=True)
 class ProjectionConfidence:
     band: str
     volatility: float
+
+
+@dataclass(frozen=True)
+class ProjectionEnvelope:
+    points: list[ProjectionPoint]
+    confidence: ProjectionConfidence
 
 
 def _clean_series(series: Iterable[HistoricalValue]) -> list[HistoricalValue]:
@@ -87,6 +95,32 @@ def build_cagr_projection(series: Iterable[HistoricalValue], projection_years: I
         points.append(ProjectionPoint(year=year, value=round(max(0.0, value), 2), projected=True))
 
     return points
+
+
+def build_projection_envelope(series: Iterable[HistoricalValue], projection_years: Iterable[int]) -> ProjectionEnvelope:
+    cleaned = _clean_series(series)
+    confidence = projection_confidence(cleaned)
+    points = build_cagr_projection(cleaned, projection_years)
+    if not points:
+        return ProjectionEnvelope(points=[], confidence=confidence)
+
+    spread = max(0.03, confidence.volatility if confidence.volatility > 0 else 0.05)
+    enriched: list[ProjectionPoint] = []
+    for point in points:
+        if not point.projected:
+            enriched.append(point)
+            continue
+        margin = max(point.value * spread, 1.0)
+        enriched.append(
+            ProjectionPoint(
+                year=point.year,
+                value=point.value,
+                projected=True,
+                lower_bound=round(max(0.0, point.value - margin), 2),
+                upper_bound=round(point.value + margin, 2),
+            )
+        )
+    return ProjectionEnvelope(points=enriched, confidence=confidence)
 
 
 def project_surviving_cohort(base_population: int, annual_survival_rate: float, years_out: int) -> int:

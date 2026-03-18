@@ -20,6 +20,7 @@ import { useState } from "react";
 const SchoolMap = dynamic(() => import("./SchoolMap"), { ssr: false });
 const WhatIfSimulator = dynamic(() => import("./WhatIfSimulator"), { ssr: false });
 const Stage2Dashboard = dynamic(() => import("./Stage2Dashboard"), { ssr: false });
+const LiveModuleDashboard = dynamic(() => import("./dashboard/modules/LiveModuleDashboard"), { ssr: false });
 
 const weightingProfileLabels: Record<string, string> = {
   standard_baseline: "Standard baseline",
@@ -59,6 +60,7 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
   const [rerunMinutes, setRerunMinutes] = useState(request.drive_minutes);
   const [rerunProfile, setRerunProfile] = useState(request.weighting_profile);
   const [rerunContext, setRerunContext] = useState(request.market_context ?? "suburban");
+  const [primaryView, setPrimaryView] = useState<"market_dashboard" | "assessment_detail">("market_dashboard");
 
   function addToast(type: "success" | "error", message: string) {
     const id = Date.now();
@@ -321,258 +323,295 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
         </div>
       )}
 
-      {/* Overall score + recommendation */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col items-center justify-center gap-3">
-          <ScoreGauge
-            score={result.feasibility_score.overall}
-            label="Overall Feasibility"
-            conservative={result.feasibility_score.scenario_conservative}
-            optimistic={result.feasibility_score.scenario_optimistic}
-          />
-          {result.data_freshness && (
-            <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
-              dataAgeWarning
-                ? "bg-orange-50 border-orange-200 text-orange-700"
-                : "bg-gray-50 border-gray-200 text-gray-500"
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dataAgeWarning ? "bg-orange-400" : "bg-green-400"}`} />
-              <span>
-                Data: {oldestSource
-                  ? `${(oldestSource.freshness_hours! / 8760).toFixed(1)}yr old`
-                  : result.data_freshness.mode}
-              </span>
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setPrimaryView("market_dashboard")}
+            className={`rounded-xl px-4 py-3 text-left transition ${
+              primaryView === "market_dashboard" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <p className="text-sm font-semibold">Market dashboard</p>
+            <p className={`mt-1 text-xs ${primaryView === "market_dashboard" ? "text-indigo-100" : "text-slate-500"}`}>
+              Maps, trends, and ZIP-level drilldowns for the strongest market questions.
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrimaryView("assessment_detail")}
+            className={`rounded-xl px-4 py-3 text-left transition ${
+              primaryView === "assessment_detail" ? "bg-slate-900 text-white shadow-sm" : "bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <p className="text-sm font-semibold">Assessment detail</p>
+            <p className={`mt-1 text-xs ${primaryView === "assessment_detail" ? "text-slate-200" : "text-slate-500"}`}>
+              Overall scores, factor cards, legacy panels, exports, and supporting diagnostics.
+            </p>
+          </button>
+        </div>
+      </div>
+
+      {primaryView === "market_dashboard" ? (
+        <LiveModuleDashboard request={request} result={result} />
+      ) : (
+        <>
+          {/* Overall score + recommendation */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 flex flex-col items-center justify-center gap-3">
+              <ScoreGauge
+                score={result.feasibility_score.overall}
+                label="Overall Feasibility"
+                conservative={result.feasibility_score.scenario_conservative}
+                optimistic={result.feasibility_score.scenario_optimistic}
+              />
+              {result.data_freshness && (
+                <div className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
+                  dataAgeWarning
+                    ? "bg-orange-50 border-orange-200 text-orange-700"
+                    : "bg-gray-50 border-gray-200 text-gray-500"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dataAgeWarning ? "bg-orange-400" : "bg-green-400"}`} />
+                  <span>
+                    Data: {oldestSource
+                      ? `${(oldestSource.freshness_hours! / 8760).toFixed(1)}yr old`
+                      : result.data_freshness.mode}
+                  </span>
+                </div>
+              )}
             </div>
+            <div className={`md:col-span-2 rounded-xl border p-6 ${recommendationStyle}`}>
+              <h3 className="text-lg font-bold mb-2">{result.recommendation}</h3>
+              <p className="text-sm leading-relaxed">{result.recommendation_detail}</p>
+            </div>
+          </div>
+
+          {/* Metric cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+            <MetricCard metric={result.feasibility_score.market_size} />
+            <MetricCard metric={result.feasibility_score.income} />
+            <MetricCard metric={result.feasibility_score.competition} />
+            <MetricCard metric={result.feasibility_score.family_density} />
+            {result.feasibility_score.occupancy ? <MetricCard metric={result.feasibility_score.occupancy} /> : null}
+            {result.feasibility_score.workforce ? <MetricCard metric={result.feasibility_score.workforce} /> : null}
+          </div>
+
+          {/* Benchmark percentile rankings */}
+          {w.benchmarks && (
+            <BenchmarkPanel benchmarks={w.benchmarks} overallScore={w.overall} />
           )}
-        </div>
-        <div className={`md:col-span-2 rounded-xl border p-6 ${recommendationStyle}`}>
-          <h3 className="text-lg font-bold mb-2">{result.recommendation}</h3>
-          <p className="text-sm leading-relaxed">{result.recommendation_detail}</p>
-        </div>
-      </div>
 
-      {/* Metric cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-        <MetricCard metric={result.feasibility_score.market_size} />
-        <MetricCard metric={result.feasibility_score.income} />
-        <MetricCard metric={result.feasibility_score.competition} />
-        <MetricCard metric={result.feasibility_score.family_density} />
-        {result.feasibility_score.occupancy ? <MetricCard metric={result.feasibility_score.occupancy} /> : null}
-        {result.feasibility_score.workforce ? <MetricCard metric={result.feasibility_score.workforce} /> : null}
-      </div>
+          {/* Hierarchical score breakdown */}
+          {w.hierarchical && (
+            <HierarchicalScorePanel hierarchical={w.hierarchical} ministryType={result.ministry_type} />
+          )}
 
-      {/* Benchmark percentile rankings */}
-      {w.benchmarks && (
-        <BenchmarkPanel benchmarks={w.benchmarks} overallScore={w.overall} />
-      )}
+          {/* Map */}
+          <SchoolMap
+            lat={result.lat}
+            lon={result.lon}
+            radiusMiles={result.radius_miles}
+            schools={result.competitor_schools}
+            schoolName={result.school_name}
+            isochronePolygon={result.isochrone_polygon}
+            catchmentType={result.catchment_type}
+            catchmentMinutes={result.catchment_minutes}
+            ministryType={result.ministry_type}
+          />
 
-      {/* Hierarchical score breakdown */}
-      {w.hierarchical && (
-        <HierarchicalScorePanel hierarchical={w.hierarchical} ministryType={result.ministry_type} />
-      )}
+          {/* Demographics */}
+          <DemographicsPanel
+            demographics={result.demographics}
+            countyName={result.county_name}
+            ministryType={result.ministry_type}
+            gender={result.gender}
+            gradeLevel={result.grade_level}
+          />
 
-      {/* Map */}
-      <SchoolMap
-        lat={result.lat}
-        lon={result.lon}
-        radiusMiles={result.radius_miles}
-        schools={result.competitor_schools}
-        schoolName={result.school_name}
-        isochronePolygon={result.isochrone_polygon}
-        catchmentType={result.catchment_type}
-        catchmentMinutes={result.catchment_minutes}
-        ministryType={result.ministry_type}
-      />
+          {result.ministry_type === "schools" && result.population_gravity && (
+            <PopulationGravityPanel
+              gravity={result.population_gravity}
+              schoolName={result.school_name}
+            />
+          )}
 
-      {/* Demographics */}
-      <DemographicsPanel
-        demographics={result.demographics}
-        countyName={result.county_name}
-        ministryType={result.ministry_type}
-        gender={result.gender}
-        gradeLevel={result.grade_level}
-      />
+          {result.ministry_type === "elder_care" && result.population_gravity && (
+            <ElderCareGravityPanel gravity={result.population_gravity} />
+          )}
 
-      {result.ministry_type === "schools" && result.population_gravity && (
-        <PopulationGravityPanel
-          gravity={result.population_gravity}
-          schoolName={result.school_name}
-        />
-      )}
+          {result.ministry_type === "housing" && result.population_gravity && (
+            <HousingGravityPanel gravity={result.population_gravity} />
+          )}
 
-      {result.ministry_type === "elder_care" && result.population_gravity && (
-        <ElderCareGravityPanel gravity={result.population_gravity} />
-      )}
+          {/* Demographic trend */}
+          {result.ministry_type === "schools" && result.trend && result.trend.trend_label !== "Unknown" && (
+            <TrendPanel trend={result.trend} />
+          )}
 
-      {result.ministry_type === "housing" && result.population_gravity && (
-        <HousingGravityPanel gravity={result.population_gravity} />
-      )}
+          {/* Competitor schools */}
+          <CompetitorTable
+            schools={result.competitor_schools}
+            catholicCount={result.catholic_school_count}
+            totalPrivateCount={result.total_private_school_count}
+            radiusMiles={result.radius_miles}
+            ministryType={result.ministry_type}
+            catchmentLabel={
+              result.catchment_type === "isochrone" && result.catchment_minutes
+                ? `${result.catchment_minutes}-min drive catchment`
+                : undefined
+            }
+          />
 
-      {/* Demographic trend */}
-      {result.ministry_type === "schools" && result.trend && result.trend.trend_label !== "Unknown" && (
-        <TrendPanel trend={result.trend} />
-      )}
+          {/* What-If financial simulator */}
+          {result.ministry_type === "schools" && <WhatIfSimulator result={result} />}
 
-      {/* Competitor schools */}
-      <CompetitorTable
-        schools={result.competitor_schools}
-        catholicCount={result.catholic_school_count}
-        totalPrivateCount={result.total_private_school_count}
-        radiusMiles={result.radius_miles}
-        ministryType={result.ministry_type}
-        catchmentLabel={
-          result.catchment_type === "isochrone" && result.catchment_minutes
-            ? `${result.catchment_minutes}-min drive catchment`
-            : undefined
-        }
-      />
+          {w.stage2 && <Stage2Dashboard stage2={w.stage2} ministryType={result.ministry_type} />}
 
-      {/* What-If financial simulator */}
-      {result.ministry_type === "schools" && <WhatIfSimulator result={result} />}
+          {(result.decision_pathway || result.benchmark_narrative || result.board_report_pack || result.data_freshness || result.trace_id || boardPackPayload) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {result.decision_pathway && (
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">Decision Pathway</p>
+                  <p className="text-sm font-semibold text-gray-900">Recommendation: {result.decision_pathway.recommended_pathway}</p>
+                  <p className="text-xs text-gray-600">Pathway confidence: {result.decision_pathway.confidence}</p>
+                  {result.decision_pathway.top_risks.length > 0 && <p className="text-xs text-gray-700">Top risks: {result.decision_pathway.top_risks.join(" • ")}</p>}
+                  {result.decision_pathway.required_validations.length > 0 && <p className="text-xs text-gray-700">Required validations: {result.decision_pathway.required_validations.join(" • ")}</p>}
+                  {result.decision_pathway.next_12_month_actions.length > 0 && <p className="text-xs text-gray-700">Next 12-month actions: {result.decision_pathway.next_12_month_actions.join(" • ")}</p>}
+                  {result.decision_pathway.partner_assessment && (
+                    <details className="text-xs text-gray-700">
+                      <summary className="cursor-pointer font-semibold">Partner assessment</summary>
+                      <p className="mt-1">Mission alignment score: {result.decision_pathway.partner_assessment.mission_alignment_score}/100</p>
+                      <p>Risk transfer: {result.decision_pathway.partner_assessment.risk_transfer_profile}</p>
+                    </details>
+                  )}
+                </div>
+              )}
 
-      {w.stage2 && <Stage2Dashboard stage2={w.stage2} ministryType={result.ministry_type} />}
+              {result.benchmark_narrative && (
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">Benchmark Narrative</p>
+                  <p className="text-sm text-gray-800">{result.benchmark_narrative.narrative_summary}</p>
+                </div>
+              )}
 
+              {result.board_report_pack && (
+                <details className="rounded-xl border border-gray-200 bg-white p-4 space-y-2 lg:col-span-2">
+                  <summary className="cursor-pointer text-sm font-semibold text-gray-900">Board-ready report pack</summary>
+                  <p className="text-xs text-gray-700 mt-2">{result.board_report_pack.executive_summary}</p>
+                  <p className="text-xs text-gray-700">Immediate actions: {result.board_report_pack.immediate_next_actions.join(" • ")}</p>
+                </details>
+              )}
 
-      {(result.decision_pathway || result.benchmark_narrative || result.board_report_pack || result.data_freshness || result.trace_id || boardPackPayload) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {result.decision_pathway && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Decision Pathway</p>
-              <p className="text-sm font-semibold text-gray-900">Recommendation: {result.decision_pathway.recommended_pathway}</p>
-              <p className="text-xs text-gray-600">Pathway confidence: {result.decision_pathway.confidence}</p>
-              {result.decision_pathway.top_risks.length > 0 && <p className="text-xs text-gray-700">Top risks: {result.decision_pathway.top_risks.join(" • ")}</p>}
-              {result.decision_pathway.required_validations.length > 0 && <p className="text-xs text-gray-700">Required validations: {result.decision_pathway.required_validations.join(" • ")}</p>}
-              {result.decision_pathway.next_12_month_actions.length > 0 && <p className="text-xs text-gray-700">Next 12-month actions: {result.decision_pathway.next_12_month_actions.join(" • ")}</p>}
-              {result.decision_pathway.partner_assessment && (
-                <details className="text-xs text-gray-700">
-                  <summary className="cursor-pointer font-semibold">Partner assessment</summary>
-                  <p className="mt-1">Mission alignment score: {result.decision_pathway.partner_assessment.mission_alignment_score}/100</p>
-                  <p>Risk transfer: {result.decision_pathway.partner_assessment.risk_transfer_profile}</p>
+              {result.data_freshness && (
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">Data freshness</p>
+                  <p className="text-xs text-gray-700">Mode: {result.data_freshness.mode} · Generated: {result.data_freshness.generated_at_utc}</p>
+                  <ul className="text-xs text-gray-700 space-y-1">
+                    {result.data_freshness.sources.map((src) => (
+                      <li key={src.source_key}>
+                        {src.source_label}: {src.status}{src.freshness_hours != null ? ` (${src.freshness_hours}h)` : ""}
+                        {src.notes ? ` — ${src.notes}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {(result.trace_id || boardPackPayload?.trace_id) && (
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase">Trace ID</p>
+                  <p className="text-xs text-gray-700 break-all">{result.trace_id ?? boardPackPayload?.trace_id}</p>
+                </div>
+              )}
+
+              {boardPackPayload && (
+                <details className="rounded-xl border border-gray-200 bg-white p-4 lg:col-span-2">
+                  <summary className="cursor-pointer text-sm font-semibold text-gray-900">Latest board-pack JSON preview</summary>
+                  <pre className="mt-2 text-[11px] text-gray-700 overflow-auto max-h-64 bg-gray-50 border border-gray-200 rounded p-2">
+                    {JSON.stringify(boardPackPayload, null, 2)}
+                  </pre>
                 </details>
               )}
             </div>
           )}
+        </>
+      )}
 
-          {result.benchmark_narrative && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Benchmark Narrative</p>
-              <p className="text-sm text-gray-800">{result.benchmark_narrative.narrative_summary}</p>
-            </div>
-          )}
-
-          {result.board_report_pack && (
-            <details className="rounded-xl border border-gray-200 bg-white p-4 space-y-2 lg:col-span-2">
-              <summary className="cursor-pointer text-sm font-semibold text-gray-900">Board-ready report pack</summary>
-              <p className="text-xs text-gray-700 mt-2">{result.board_report_pack.executive_summary}</p>
-              <p className="text-xs text-gray-700">Immediate actions: {result.board_report_pack.immediate_next_actions.join(" • ")}</p>
-            </details>
-          )}
-
-          {result.data_freshness && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Data freshness</p>
-              <p className="text-xs text-gray-700">Mode: {result.data_freshness.mode} · Generated: {result.data_freshness.generated_at_utc}</p>
-              <ul className="text-xs text-gray-700 space-y-1">
-                {result.data_freshness.sources.map((src) => (
-                  <li key={src.source_key}>
-                    {src.source_label}: {src.status}{src.freshness_hours != null ? ` (${src.freshness_hours}h)` : ""}
-                    {src.notes ? ` — ${src.notes}` : ""}
+      {primaryView === "assessment_detail" && (
+        <>
+          {/* Data notes */}
+          {result.data_notes.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex gap-2 mb-2">
+                <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs font-semibold text-blue-800">Data Sources & Methodology Notes</p>
+              </div>
+              <ul className="space-y-1">
+                {result.data_notes.map((note, i) => (
+                  <li key={i} className="text-xs text-blue-700 ml-6">
+                    {note}
                   </li>
                 ))}
               </ul>
             </div>
           )}
 
-          {(result.trace_id || boardPackPayload?.trace_id) && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <p className="text-xs font-semibold text-gray-500 uppercase">Trace ID</p>
-              <p className="text-xs text-gray-700 break-all">{result.trace_id ?? boardPackPayload?.trace_id}</p>
+          {/* Stage 1/2/3 interpretation framework */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">
+              How to Use This Score
+            </h3>
+            <p className="text-xs text-gray-600 mb-3 leading-relaxed">
+              This tool produces a <strong>Stage 1 sustainability screen</strong> — a directional signal, not a
+              decision-grade forecast. A high score warrants deeper investigation; a low score is a caution
+              flag, not an automatic closure recommendation. Strategic commitments should only follow Stage 3 local validation.
+            </p>
+            <p className="text-xs text-gray-500 mb-4 leading-relaxed border-t border-gray-200 pt-3">
+              <strong className="text-gray-600">Scoring methodology</strong> · Four market factors: Market Size ({w.market_size.weight}%), Income Level ({w.income.weight}%),
+              Competition ({w.competition.weight}%), Family Density ({w.family_density.weight}%). Competition weights demand-validation at 60% and
+              saturation at 40%, reflecting NCEA 2024-2025 data showing 39.3% of Catholic schools have
+              waiting lists — existing school presence is more often a demand signal than market saturation.
+              Income score includes a bonus for states with established parental choice programs (NCEA 2024-2025:
+              18% of students nationally; 50%+ in FL, OH, IN, OK, IA, AZ).
+              Enrollment benchmarks reference NCEA 2024-2025 Exhibit 6: modal Catholic school enrolls 150–299 students
+              (38.6% of schools); microschool threshold is &lt;150 students.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-white border border-green-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
+                  <span className="text-xs font-semibold text-green-800">Market Feasibility</span>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  <strong className="text-gray-700">This tool.</strong> Census demographics, competitor
+                  presence, income levels, and family density. Indicates whether local conditions can support continued operation.
+                </p>
+              </div>
+              <div className="bg-white border border-yellow-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-yellow-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">2</span>
+                  <span className="text-xs font-semibold text-yellow-800">Institutional Economics</span>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  <strong className="text-gray-700">Next step.</strong> Enrollment sustainability, tuition
+                  discount rate, operating margin, subsidy dependency, and mission fit for ongoing school operations.
+                </p>
+              </div>
+              <div className="bg-white border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
+                  <span className="text-xs font-semibold text-blue-800">Local Validation</span>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  <strong className="text-gray-700">Before committing.</strong> Sponsor and community
+                  engagement, feeder-school outreach, parent demand surveys, diocesan alignment, and
+                  local listening sessions.
+                </p>
+              </div>
             </div>
-          )}
-
-          {boardPackPayload && (
-            <details className="rounded-xl border border-gray-200 bg-white p-4 lg:col-span-2">
-              <summary className="cursor-pointer text-sm font-semibold text-gray-900">Latest board-pack JSON preview</summary>
-              <pre className="mt-2 text-[11px] text-gray-700 overflow-auto max-h-64 bg-gray-50 border border-gray-200 rounded p-2">
-                {JSON.stringify(boardPackPayload, null, 2)}
-              </pre>
-            </details>
-          )}
-        </div>
+          </div>
+        </>
       )}
-
-      {/* Data notes */}
-      {result.data_notes.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <div className="flex gap-2 mb-2">
-            <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
-            <p className="text-xs font-semibold text-blue-800">Data Sources & Methodology Notes</p>
-          </div>
-          <ul className="space-y-1">
-            {result.data_notes.map((note, i) => (
-              <li key={i} className="text-xs text-blue-700 ml-6">
-                {note}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Stage 1/2/3 interpretation framework */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-800 mb-3">
-          How to Use This Score
-        </h3>
-        <p className="text-xs text-gray-600 mb-3 leading-relaxed">
-          This tool produces a <strong>Stage 1 sustainability screen</strong> — a directional signal, not a
-          decision-grade forecast. A high score warrants deeper investigation; a low score is a caution
-          flag, not an automatic closure recommendation. Strategic commitments should only follow Stage 3 local validation.
-        </p>
-        <p className="text-xs text-gray-500 mb-4 leading-relaxed border-t border-gray-200 pt-3">
-          <strong className="text-gray-600">Scoring methodology</strong> · Four market factors: Market Size ({w.market_size.weight}%), Income Level ({w.income.weight}%),
-          Competition ({w.competition.weight}%), Family Density ({w.family_density.weight}%). Competition weights demand-validation at 60% and
-          saturation at 40%, reflecting NCEA 2024-2025 data showing 39.3% of Catholic schools have
-          waiting lists — existing school presence is more often a demand signal than market saturation.
-          Income score includes a bonus for states with established parental choice programs (NCEA 2024-2025:
-          18% of students nationally; 50%+ in FL, OH, IN, OK, IA, AZ).
-          Enrollment benchmarks reference NCEA 2024-2025 Exhibit 6: modal Catholic school enrolls 150–299 students
-          (38.6% of schools); microschool threshold is &lt;150 students.
-          
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-white border border-green-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="w-5 h-5 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">1</span>
-              <span className="text-xs font-semibold text-green-800">Market Feasibility</span>
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              <strong className="text-gray-700">This tool.</strong> Census demographics, competitor
-              presence, income levels, and family density. Indicates whether local conditions can support continued operation.
-            </p>
-          </div>
-          <div className="bg-white border border-yellow-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="w-5 h-5 rounded-full bg-yellow-500 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">2</span>
-              <span className="text-xs font-semibold text-yellow-800">Institutional Economics</span>
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              <strong className="text-gray-700">Next step.</strong> Enrollment sustainability, tuition
-              discount rate, operating margin, subsidy dependency, and mission fit for ongoing school operations.
-            </p>
-          </div>
-          <div className="bg-white border border-blue-200 rounded-lg p-3">
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">3</span>
-              <span className="text-xs font-semibold text-blue-800">Local Validation</span>
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              <strong className="text-gray-700">Before committing.</strong> Sponsor and community
-              engagement, feeder-school outreach, parent demand surveys, diocesan alignment, and
-              local listening sessions.
-            </p>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

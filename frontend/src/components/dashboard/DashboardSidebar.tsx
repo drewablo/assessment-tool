@@ -20,16 +20,19 @@ export default function DashboardSidebar({ items, activeKey, onSelect }: Props) 
             onClick={() => onSelect(item.key)}
             className={`w-full rounded-2xl border px-4 py-4 text-left transition-all ${
               active
-                ? "border-indigo-200 bg-indigo-50 shadow-sm"
+                ? "border-indigo-200 bg-indigo-50 shadow-sm ring-1 ring-indigo-100"
                 : "border-transparent bg-transparent hover:border-slate-200 hover:bg-white"
             }`}
           >
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className={`text-sm font-semibold ${active ? "text-slate-950" : "text-slate-800"}`}>
-                  {item.title}
-                </p>
-                <p className="mt-1 text-sm leading-5 text-slate-500">{item.description}</p>
+              <div className="flex gap-3">
+                <span className={`mt-1 h-8 w-1 rounded-full ${active ? "bg-indigo-500" : "bg-slate-200"}`} />
+                <div>
+                  <p className={`text-sm font-semibold ${active ? "text-slate-950" : "text-slate-800"}`}>
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-slate-500">{item.description}</p>
+                </div>
               </div>
               {item.badge ? (
                 <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">
