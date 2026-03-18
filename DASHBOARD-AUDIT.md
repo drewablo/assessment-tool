@@ -4,7 +4,7 @@ _Date:_ 2026-03-18
 
 ## Scope and method
 
-This audit inventories the current React frontend, the backend API surface, core data contracts, and the data already computed for the three ministry modules (Schools, Elder Care, Low-Income Housing). It is intended to be the required Phase 0 gate before any dashboard overhaul work begins.
+This audit inventories the current React frontend, the backend API surface, core data contracts, and the data already computed for the three ministry modules (Schools, Elder Care, Low-Income Housing). It now also records the current rollout-state implementation details after the additive live dashboard, ZCTA ingest pipeline, and catchment-intersection fixes landed.
 
 ### Important findings up front
 
@@ -19,7 +19,7 @@ This audit inventories the current React frontend, the backend API surface, core
    - The current per-ZIP values are dashboard-oriented live mappings built from catchment/module analysis outputs; they should not yet be mistaken for a finalized ZIP-native analytical model.
 4. **A ZIP/ZCTA boundary cache pipeline now exists, but production readiness still depends on cache coverage.**
    - `python -m pipeline.cli ingest-zcta` now downloads and caches Census ZCTA boundaries for dashboard use.
-   - When the cache is unavailable or incomplete, the live dashboard currently falls back to synthetic ZIP tiles so the UI can degrade gracefully during rollout.
+   - When the cache is unavailable, the backend now reports `geometry_source=cache_unavailable` and returns an empty ZIP feature collection; the frontend renders an explicit empty/degraded-state message instead of synthetic ZIP tiles.
 5. **Projection support is now partially generalized, but not yet fully source-native.**
    - There is now a shared projection-envelope utility with confidence labels / bounds for dashboard time-series payloads.
    - Elder care still retains its original 5-year/10-year senior projection logic.
@@ -79,7 +79,7 @@ Below is the effective component catalog used by the current frontend.
 
 #### Present, but only partially aligned to the target design
 - **Trend handling now exists in both legacy and live-dashboard forms**, but some live time series are still derived/back-cast rather than fully source-native.
-- **Map handling now includes ZIP choropleth support**, but production behavior still depends on ZCTA cache coverage and currently falls back to synthetic ZIP tiles when geometry is unavailable.
+- **Map handling now includes ZIP choropleth support**, but production behavior still depends on ZCTA cache coverage and now degrades to an explicit empty-geometry state when ZIP shapes are unavailable.
 - **Stage 2 and what-if views remain available outside the live dashboard shell**, which is intentional during rollout but still leaves a split experience.
 - **Direction/gravity panels still coexist with the new ZIP dashboard**, so the product currently carries both legacy and rollout-era analytical surfaces at once.
 
@@ -100,7 +100,7 @@ Below is the effective component catalog used by the current frontend.
 | `/api/health` | GET | Active | Basic API/service health. | Service status, version, optional DB health summary. | No. | No. | No. |
 | `/api/data-health` | GET | Active | Detailed DB readiness diagnostics. | DB connectivity/readiness metadata. | No. | No. | No. |
 | `/api/analyze` | POST | Active | Main ministry analysis endpoint. | `AnalysisResponse` with demographics, competitors, scores, recommendation, optional trend/gravity/forecast, catchment polygon. | **No ZIP breakdown.** Catchment-wide aggregated output. | **Partial.** Trend summary + optional forecast/projection fields only. | **Partial.** Returns `isochrone_polygon` catchment GeoJSON, not ZIP boundaries. |
-| `/api/dashboard` | POST | Active, additive rollout endpoint | Module dashboard payload for the new ZIP-level dashboard shell. | ZIP codes, ZIP `FeatureCollection`, per-ZIP metric maps, drilldowns, module-specific time series, highlight cards, projection metadata, freshness metadata, geometry source. | **Yes, partial.** ZIP outputs now exist, but current per-ZIP values are still dashboard-oriented mappings rather than finalized ZIP-native aggregation. | **Yes, partial.** Shared historical/projected arrays now exist, with confidence labeling. | **Yes, partial.** Uses cached Census ZCTA geometry when available and synthetic fallback geometry otherwise. |
+| `/api/dashboard` | POST | Active, additive rollout endpoint | Module dashboard payload for the new ZIP-level dashboard shell. | ZIP codes, ZIP `FeatureCollection`, per-ZIP metric maps, drilldowns, module-specific time series, highlight cards, projection metadata, freshness metadata, geometry source, and ZIP-selection metadata. | **Yes, partial.** ZIP outputs now exist, with tract-backed rollups when available and area-weighted fallback estimates otherwise. | **Yes, partial.** Shared historical/projected arrays now exist, with confidence labeling. | **Yes, partial.** Uses cached Census ZCTA geometry when available; otherwise returns an empty geometry payload with explicit metadata rather than synthetic ZIP tiles. |
 | `/api/analyze/compare` | POST | Active | Compare multiple ministry types at one address. | Ranked ministry summaries only. | No. | No. | No. |
 | `/api/export/board-pack` | POST | Active | Export board-pack JSON. | Board narrative pack + freshness/readiness metadata. | No. | No. | No. |
 | `/api/export/csv` | POST | Active | Export CSV report. | File stream. | No. | No. | No. |
@@ -164,7 +164,7 @@ The main endpoint returns a broad `AnalysisResponse`, but it is optimized for th
 
 #### Still missing / partial today
 - **True ZIP-native spatial aggregation queries** from tract/census storage into a durable ZIP analytical layer.
-- **Guaranteed production geometry coverage** without fallback; the current implementation can still degrade to synthetic ZIP tiles if the ZCTA cache is absent or incomplete.
+- **Guaranteed production geometry coverage** without degraded states; the current implementation still depends on the ZCTA cache, and a cache miss produces an explicit empty geometry payload.
 - **DB-backed ZIP centroid / selection infrastructure** beyond the current dashboard payload shaping path.
 
 ### 2.4 Time-series / projection reality check
@@ -233,7 +233,7 @@ Legend:
 | Historical trend series | **Partial** | Dashboard payloads now expose shared annual series, but some are derived/back-cast from existing analysis outputs rather than a dedicated historical ZIP store. |
 | ZIP-level school-age population | **Partial** | Live dashboard now returns per-ZIP values, but current mapping is dashboard-oriented rather than finalized ZIP-native aggregation. |
 | ZIP-level income distribution | **Partial** | Live dashboard now returns ZIP drilldown distributions, but they are not yet backed by a full ZIP-native census warehouse. |
-| ZIP-level choropleth metrics | **Partial** | ZIP `FeatureCollection` and metric properties now exist via `/api/dashboard`, with cached Census geometry preferred and synthetic fallback available during rollout. |
+| ZIP-level choropleth metrics | **Partial** | ZIP `FeatureCollection` and metric properties now exist via `/api/dashboard`, with cached Census geometry preferred and an explicit empty-geometry degraded state when cache coverage is missing. |
 | Diversity / race-ethnicity analytics | **Missing/unclear in current UI contract** | Not visible in current `AnalysisResponse` schema used by frontend. |
 | Financial gap per ZIP | **Missing** | No per-ZIP affordability gap output. |
 | Competitor table with tuition/typology enrichment for dashboard shell | **Partial** | Table exists, but NAIS-style deeper competitor analytics are not yet delivered as a dedicated endpoint. |
@@ -287,7 +287,7 @@ Legend:
 
 | Requested shared component | Current equivalent? | Gap assessment |
 |---|---|---|
-| `ChoroplethMap` | Shared dashboard component now exists and is live-wired additively | **Addressed, rollout-stage** — live payloads now feed ZIP choropleths, but geometry can still fall back to synthetic shapes when cache coverage is missing. |
+| `ChoroplethMap` | Shared dashboard component now exists and is live-wired additively | **Addressed, rollout-stage** — live payloads now feed ZIP choropleths, and the component now handles empty-geometry states explicitly when cache coverage is missing. |
 | `TrendChart` | Shared dashboard component now exists and is live-wired additively | **Addressed, rollout-stage** — shared historical/projected charting is now present, though some histories remain derived/back-cast. |
 | `DistributionChart` | Shared dashboard component now exists and is live-wired additively | **Addressed, rollout-stage**. |
 | `ZipDrilldownCard` | Shared dashboard component now exists and is live-wired additively | **Addressed, rollout-stage**. |
@@ -299,8 +299,8 @@ Legend:
 
 | Requested capability | Current state | Gap assessment |
 |---|---|---|
-| ZIP boundary FeatureCollection | Partial | **Reduced gap** — additive dashboard payloads now return ZIP geometry, but quality depends on ZCTA cache availability. |
-| Per-ZIP metric values | Partial | **Reduced gap** — per-ZIP maps now exist, though current logic is still dashboard-oriented rather than finalized ZIP-native aggregation. |
+| ZIP boundary FeatureCollection | Partial | **Reduced gap** — additive dashboard payloads now return ZIP geometry selected by catchment/ZCTA intersection, but quality still depends on ZCTA cache availability. |
+| Per-ZIP metric values | Partial | **Reduced gap** — per-ZIP maps now exist and now prefer tract-backed ZIP rollups, though the logic is still not a finalized ZIP-native aggregation layer. |
 | Shared dashboard response envelope | Addressed | **Core contract now exists** via `/api/dashboard`. |
 | Historical + projected time series arrays | Partial | **Reduced gap** — shared arrays now exist, but source-native depth is still uneven by module. |
 | Projection confidence metadata | Partial | **Reduced gap** — confidence bands/labels are now returned, but forecasting rigor remains uneven. |
@@ -339,7 +339,7 @@ The overhaul should therefore be **additive**, not a replacement of the current 
 ## 7. Key risks and blockers to flag before implementation
 
 ### Blocker A — ZIP boundary coverage is not yet guaranteed
-The requested choropleth and drilldown experience now has a ZCTA ingest/cache path, but production behavior still depends on that cache being populated. Without it, the live dashboard degrades to synthetic ZIP tiles.
+The requested choropleth and drilldown experience now has a ZCTA ingest/cache path, but production behavior still depends on that cache being populated. Without it, the live dashboard now degrades to an explicit empty-geometry state rather than synthetic ZIP tiles.
 
 ### Blocker B — Current data model is tract/catchment-first, not ZIP-first
 The backend’s demographic aggregation and many current score calculations still operate at catchment-wide tract aggregation. The live dashboard now maps those outputs into ZIP drilldowns, but a finalized ZIP-native analytical layer is still missing.
@@ -403,6 +403,11 @@ This section records what has been addressed since the original Phase 0 audit an
 - **A Census ZCTA ingest/cache command now exists**:
   - `python -m pipeline.cli ingest-zcta`
   - stores cached ZCTA geometry for backend dashboard use
+- **The full ingest workflow now includes ZCTA ingestion** so `python -m pipeline.cli ingest-all` refreshes ZIP geometry alongside the other dashboard dependencies.
+- **Catchment ZIP selection is now intersection-based rather than seed-based.**
+  - The dashboard prefers actual catchment/ZCTA overlap and caps the selected ZIP set with overlap-based weighting metadata.
+- **The dashboard now prefers tract-backed ZIP rollups when available.**
+  - When tract assignment cannot be loaded, the service falls back to area-weighted estimates rather than synthetic geometry.
 - **The live module dashboard is now mounted into the post-analysis user flow** as an expandable section beneath the existing result dashboard.
 
 ### 9.2 Still not addressed
@@ -410,9 +415,9 @@ This section records what has been addressed since the original Phase 0 audit an
 The original blockers have been reduced, but several important maturity gaps remain:
 
 - **ZIP geometry coverage is still cache-dependent.**
-  - If the ZCTA cache is not populated, the live dashboard falls back to synthetic ZIP shapes.
-- **Per-ZIP metrics are still dashboard-oriented mappings, not finalized ZIP-native aggregations.**
-  - This is especially important for schools affordability, elder-care quality-gap, and housing need views.
+  - If the ZCTA cache is not populated, the live dashboard reports `cache_unavailable`, returns no ZIP features, and shows an explicit degraded-state message in the frontend.
+- **Per-ZIP metrics are improved but still not a finalized ZIP-native warehouse.**
+  - The dashboard now uses tract-backed ZIP rollups when available and area-weighted fallbacks otherwise, which is materially better than seed-based mappings but still not the same as a fully durable ZIP analytical layer.
 - **Historical and projected dashboard series are normalized, but not yet uniformly source-native.**
   - Some series are still derived/back-cast from current module outputs.
 - **Performance work for large real-world GeoJSON payloads is still incomplete.**
@@ -426,8 +431,8 @@ Before Phase 3 (testing/performance hardening) begins, the following Phase 1/2 i
 
 1. **Promote the current ZIP layer from rollout-grade to production-grade**
    - Ensure Census ZCTA cache population is part of normal deployment/refresh workflows.
-   - Replace synthetic fallback reliance with dependable geometry coverage.
-   - Tighten catchment-level ZIP selection so it is driven by robust spatial logic rather than fallback seeding.
+   - Keep dependable geometry coverage as part of deployment/refresh workflows so the empty-geometry degraded state stays rare.
+   - Continue tightening catchment-level ZIP selection around actual catchment/ZCTA intersection and tract assignment quality.
 
 2. **Replace dashboard-oriented ZIP mappings with finalized ZIP-native aggregation**
    - Schools: affordability, enrollment, student-body, and competitor views backed by live data.
@@ -447,7 +452,7 @@ Before Phase 3 (testing/performance hardening) begins, the following Phase 1/2 i
 5. **Phase 3 test-readiness**
    - Add broader backend endpoint coverage for `/api/dashboard`.
    - Add integration coverage around live dashboard rendering and degraded states.
-   - Add regression coverage for cache-miss / geometry-fallback / partial-data cases.
+   - Add broader regression coverage for cache-miss / empty-geometry / partial-data cases.
 
 ### 9.4 Phase gate recommendation
 
