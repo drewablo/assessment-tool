@@ -36,6 +36,8 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
 
   const Wrapper = embedded ? "div" : "main";
 
+  const Wrapper = embedded ? "div" : "main";
+
   return (
     <Wrapper className={`${embedded ? "rounded-[32px] bg-[#f7f7fc] p-4 sm:p-6" : "min-h-screen bg-[#f7f7fc] px-6 py-10"} text-slate-900`}>
       <div className={`mx-auto ${embedded ? "max-w-full" : "max-w-[1440px]"} space-y-8`}>
