@@ -34,12 +34,14 @@ def _shape_to_feature(shape_rec: shapefile.ShapeRecord) -> dict:
     attrs = shape_rec.record.as_dict()
     zip_code = str(attrs.get("ZCTA5CE20") or attrs.get("GEOID20") or "").strip()
     geojson = shape_rec.shape.__geo_interface__
+    bbox = list(getattr(shape_rec.shape, "bbox", []) or [])
     return {
         "type": "Feature",
         "properties": {
             "zipCode": zip_code,
             "name": zip_code,
             "source": "census_zcta",
+            "bbox": [round(float(value), _SIMPLIFY_DECIMALS) for value in bbox] if bbox else None,
         },
         "geometry": {
             "type": geojson.get("type"),

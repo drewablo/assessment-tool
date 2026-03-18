@@ -1,9 +1,18 @@
+from __future__ import annotations
+
+import gzip
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+import main
 from models.schemas import (
     AnalysisRequest,
     AnalysisResponse,
     CompetitorSchool,
     ConfidenceSummary,
-    DashboardResponse,
     DataFreshnessMetadata,
     DataFreshnessSource,
     DemographicData,
@@ -12,15 +21,22 @@ from models.schemas import (
     FallbackSummary,
     MetricScore,
 )
-from services.dashboard_service import build_dashboard_response
+from services import dashboard_service
 from services.projections import HistoricalValue, build_projection_envelope
+
+
+@pytest.fixture(autouse=True)
+def clear_zcta_cache():
+    dashboard_service._load_zcta_cache.cache_clear()
+    yield
+    dashboard_service._load_zcta_cache.cache_clear()
 
 
 def _metric(label: str, score: int, weight: int = 25) -> MetricScore:
     return MetricScore(score=score, label=label, description=label, weight=weight, rating="moderate")
 
 
-def _response(ministry_type: str) -> AnalysisResponse:
+def _response(ministry_type: str = "schools") -> AnalysisResponse:
     return AnalysisResponse(
         school_name="St. Example",
         ministry_type=ministry_type,
@@ -29,9 +45,9 @@ def _response(ministry_type: str) -> AnalysisResponse:
         state_name="Florida",
         lat=26.6406,
         lon=-81.8723,
-        radius_miles=8.0,
+        radius_miles=6.0,
         catchment_minutes=20,
-        catchment_type="isochrone",
+        catchment_type="radius",
         gender="coed",
         grade_level="k12",
         demographics=DemographicData(
@@ -109,7 +125,7 @@ def _response(ministry_type: str) -> AnalysisResponse:
         recommendation_detail="Directional test payload",
         data_notes=[],
         run_mode="db_with_fallback",
-        catchment_mode="isochrone",
+        catchment_mode="radius",
         outcome="success",
         fallback_summary=FallbackSummary(used=False, notes=[]),
         confidence_summary=ConfidenceSummary(level="medium", contributors=[]),
@@ -129,7 +145,42 @@ def _response(ministry_type: str) -> AnalysisResponse:
     )
 
 
-def test_projection_envelope_adds_bounds_to_projected_points():
+def _write_zcta_cache(path: Path):
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"zipCode": "33901", "name": "33901", "source": "test"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"zipCode": "33916", "name": "33916", "source": "test"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[-81.88, 26.63], [-81.78, 26.63], [-81.78, 26.73], [-81.88, 26.73], [-81.88, 26.63]]],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"zipCode": "99999", "name": "99999", "source": "test"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[-82.4, 26.2], [-82.3, 26.2], [-82.3, 26.3], [-82.4, 26.3], [-82.4, 26.2]]],
+                },
+            },
+        ],
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(payload, fh)
+
+
+@pytest.mark.asyncio
+async def test_projection_envelope_adds_bounds_to_projected_points():
     envelope = build_projection_envelope(
         [HistoricalValue(2020, 100), HistoricalValue(2021, 105), HistoricalValue(2022, 112)],
         [2023, 2024],
@@ -142,8 +193,18 @@ def test_projection_envelope_adds_bounds_to_projected_points():
     assert envelope.confidence.band in {"high", "medium", "low"}
 
 
+@pytest.mark.asyncio
+async def test_dashboard_response_selects_intersecting_zips_not_seeded_fallbacks(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
 
-def test_dashboard_response_includes_zip_metrics_and_drilldowns():
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+
     request = AnalysisRequest(
         school_name="St. Example",
         address="123 Main St, Fort Myers, FL 33901",
@@ -157,22 +218,29 @@ def test_dashboard_response_includes_zip_metrics_and_drilldowns():
         market_context="suburban",
         care_level="all",
     )
-    payload = build_dashboard_response(
+    payload = await dashboard_service.build_dashboard_response(
         request=request,
         result=_response("schools"),
         location={"matched_address": "123 Main St, Fort Myers, FL 33901"},
     )
 
-    assert isinstance(payload, DashboardResponse)
-    assert payload.catchment.zip_codes
-    assert payload.catchment.geojson["type"] == "FeatureCollection"
-    assert "familiesWithChildren" in payload.data.metric_maps
-    assert payload.data.drilldowns[payload.catchment.zip_codes[0]].metrics
-    assert payload.metadata.projection_years
+    assert payload.metadata.geometry_source == "census_zcta_cache"
+    assert payload.catchment.zip_codes == ["33901", "33916"]
+    assert "33971" not in payload.catchment.zip_codes
+    assert payload.catchment.geojson["features"][0]["properties"]["schoolAgePopulation"] > 0
 
 
+@pytest.mark.asyncio
+async def test_dashboard_response_reports_cache_unavailable_without_synthetic_geometry(tmp_path, monkeypatch):
+    cache_path = tmp_path / "missing.json.gz"
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
 
-def test_housing_dashboard_maps_existing_resource_metrics():
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+
     request = AnalysisRequest(
         school_name="St. Example",
         address="123 Main St, Fort Myers, FL 33901",
@@ -187,11 +255,73 @@ def test_housing_dashboard_maps_existing_resource_metrics():
         care_level="all",
         housing_target_population="all_ages",
     )
-    payload = build_dashboard_response(
+    payload = await dashboard_service.build_dashboard_response(
         request=request,
         result=_response("housing"),
         location={"matched_address": "123 Main St, Fort Myers, FL 33901"},
     )
 
-    assert "costBurdenedHouseholds" in payload.data.metric_maps
-    assert payload.data.highlight_cards[2].value == "145"
+    assert payload.metadata.geometry_source == "cache_unavailable"
+    assert payload.catchment.zip_codes == []
+    assert payload.catchment.geojson["features"] == []
+
+
+@pytest.mark.asyncio
+async def test_dashboard_endpoint_returns_additive_payload(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    async def _fake_geocode(_address: str):
+        return {
+            "lat": 26.6406,
+            "lon": -81.8723,
+            "matched_address": "123 Main St, Fort Myers, FL 33901",
+            "county_fips": "12071",
+            "state_fips": "12",
+            "county_name": "Lee County",
+            "state_name": "Florida",
+        }
+
+    async def _fake_get_redis():
+        return None
+
+    async def _fake_run_analysis(_location, request, run_mode=None):
+        return _response(request.ministry_type), {"fallback_notes": []}
+
+    async def _fake_enrich(result, request):
+        return result
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+    monkeypatch.setattr(main, "geocode_address", _fake_geocode)
+    monkeypatch.setattr(main, "_get_redis", _fake_get_redis)
+    monkeypatch.setattr(main, "_run_analysis", _fake_run_analysis)
+    monkeypatch.setattr(main, "_enrich_analysis_result", _fake_enrich)
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/dashboard",
+        json={
+            "school_name": "St. Example",
+            "address": "123 Main St, Fort Myers, FL 33901",
+            "ministry_type": "schools",
+            "mission_mode": False,
+            "drive_minutes": 20,
+            "geography_mode": "catchment",
+            "gender": "coed",
+            "grade_level": "k12",
+            "weighting_profile": "standard_baseline",
+            "market_context": "suburban",
+            "care_level": "all",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["catchment"]["zip_codes"] == ["33901", "33916"]
+    assert body["metadata"]["geometry_source"] == "census_zcta_cache"
+    assert body["data"]["metric_maps"]["schoolAgePopulation"]["33901"] > 0

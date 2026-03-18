@@ -1107,7 +1107,7 @@ async def dashboard(request: AnalysisRequest):
         )
         result = await _enrich_analysis_result(result, request)
 
-    payload = build_dashboard_response(request=request, result=result, location=location)
+    payload = await build_dashboard_response(request=request, result=result, location=location)
     if redis:
         try:
             await redis.setex(dashboard_cache_key, CACHE_TTL, payload.model_dump_json())

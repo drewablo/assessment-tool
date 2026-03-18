@@ -1,7 +1,7 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { FeatureCollection, GeoJsonObject } from "geojson";
 import ChartActionBar from "./ChartActionBar";
 import {
@@ -31,7 +31,7 @@ function getColor(value: number, min: number, max: number) {
   return `hsl(238 76% ${lightness}%)`;
 }
 
-export default function ChoroplethMap({
+function ChoroplethMap({
   title,
   subtitle,
   featureCollection,
@@ -46,12 +46,21 @@ export default function ChoroplethMap({
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
   const layerRef = useRef<import("leaflet").GeoJSON | null>(null);
+  const metricRows = useMemo(
+    () =>
+      featureCollection.features.map((feature) => ({
+        zip_code: String(feature.properties?.zipCode ?? feature.properties?.zip ?? ""),
+        metric: metric.label,
+        value: Number(feature.properties?.[metric.key]),
+      })),
+    [featureCollection.features, metric.key, metric.label],
+  );
 
   useEffect(() => {
     let mounted = true;
 
     async function init() {
-      if (!mapRef.current) return;
+      if (!mapRef.current || featureCollection.features.length === 0) return;
       const L = (await import("leaflet")).default;
       if (!mounted) return;
 
@@ -107,6 +116,8 @@ export default function ChoroplethMap({
     };
   }, [featureCollection, metric, onZipSelect, selectedZip]);
 
+  const isEmpty = featureCollection.features.length === 0;
+
   return (
     <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-6 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -126,22 +137,19 @@ export default function ChoroplethMap({
           </select>
           <ChartActionBar
             onDownloadPng={() => downloadElementAsPng(`${fileBaseName}.png`, shellRef.current)}
-            onDownloadCsv={() =>
-              downloadCsv(
-                `${fileBaseName}.csv`,
-                featureCollection.features.map((feature) => ({
-                  zip_code: String(feature.properties?.zipCode ?? feature.properties?.zip ?? ""),
-                  metric: metric.label,
-                  value: Number(feature.properties?.[metric.key]),
-                })),
-              )
-            }
+            onDownloadCsv={() => downloadCsv(`${fileBaseName}.csv`, metricRows)}
           />
         </div>
       </div>
 
       <div ref={shellRef} className="space-y-4">
-        <div ref={mapRef} className="h-[420px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
+        {isEmpty ? (
+          <div className="flex h-[420px] w-full items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">
+            ZIP geometry is not available for this catchment yet. Populate the ZCTA cache and rerun the dashboard to render the choropleth.
+          </div>
+        ) : (
+          <div ref={mapRef} className="h-[420px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
+        )}
         <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-slate-500">
           <div className="flex items-center gap-3">
             <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Low</span>
@@ -154,3 +162,5 @@ export default function ChoroplethMap({
     </div>
   );
 }
+
+export default memo(ChoroplethMap);

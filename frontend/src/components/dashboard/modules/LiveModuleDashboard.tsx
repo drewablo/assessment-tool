@@ -76,5 +76,19 @@ export default function LiveModuleDashboard({ request }: Props) {
     );
   }
 
+  if (payload && payload.catchment.zip_codes.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm">
+        <p className="font-semibold text-slate-900">No ZIP geometry available for this catchment yet</p>
+        <p className="mt-2">
+          The live dashboard is enabled, but the backend could not load catchment ZIP geometry. This usually means the ZCTA cache has not been populated for the current environment.
+        </p>
+        <p className="mt-2 text-xs text-slate-500">
+          Geometry source: {payload.metadata.geometry_source ?? "unknown"}.
+        </p>
+      </div>
+    );
+  }
+
   return <ModuleDashboardView config={config} embedded />;
 }

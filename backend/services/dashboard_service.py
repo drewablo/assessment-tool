@@ -3,13 +3,17 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import math
 import os
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
+
+from shapely.geometry import Point, shape
+from shapely.prepared import prep
 
 from models.schemas import (
     AnalysisRequest,
@@ -33,590 +37,834 @@ from services.projections import HistoricalValue, build_projection_envelope
 logger = logging.getLogger(__name__)
 
 ZCTA_CACHE_PATH = Path(os.getenv("ZCTA_CACHE_PATH", Path(__file__).resolve().parents[1] / "data" / "zcta_boundaries.json.gz"))
-FALLBACK_ZIP_COUNT = 4
 DASHBOARD_DATA_YEAR = int(os.getenv("DASHBOARD_DATA_YEAR", "2024"))
 DASHBOARD_PROJECTION_HORIZON = int(os.getenv("DASHBOARD_PROJECTION_HORIZON", "5"))
+DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "24"))
 
-SEED_ZIP_BY_MODULE = {
-    "schools": ["33971", "33913", "33967", "33912"],
-    "elder_care": ["33919", "33907", "33908", "33901"],
-    "housing": ["33916", "33901", "33905", "33907"],
-}
+
+@dataclass(frozen=True)
+class ZctaRecord:
+    zip_code: str
+    feature: dict[str, Any]
+    geometry: Any
+    bounds: tuple[float, float, float, float]
+
+
+@dataclass(frozen=True)
+class DashboardSpatialContext:
+    zip_codes: list[str]
+    feature_collection: dict[str, Any]
+    geometry_source: str
+    selection_method: str
+    catchment_geometry: Any
+    intersection_weights: dict[str, float]
 
 
 @lru_cache(maxsize=1)
-def _load_zcta_cache() -> dict[str, dict[str, Any]]:
+def _load_zcta_cache() -> dict[str, ZctaRecord]:
     if not ZCTA_CACHE_PATH.exists():
         return {}
+
     try:
         with gzip.open(ZCTA_CACHE_PATH, "rt", encoding="utf-8") as fh:
             payload = json.load(fh)
-        features = payload.get("features") if isinstance(payload, dict) else None
-        if not isinstance(features, list):
-            return {}
-        mapped: dict[str, dict[str, Any]] = {}
-        for feature in features:
-            props = feature.get("properties") or {}
-            zip_code = str(props.get("zipCode") or props.get("ZCTA5CE20") or props.get("GEOID20") or "").strip()
-            if zip_code:
-                mapped[zip_code] = feature
-        return mapped
     except Exception:
         logger.warning("Unable to read ZCTA cache from %s", ZCTA_CACHE_PATH, exc_info=True)
         return {}
+
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if not isinstance(features, list):
+        return {}
+
+    records: dict[str, ZctaRecord] = {}
+    for feature in features:
+        props = feature.get("properties") or {}
+        zip_code = str(props.get("zipCode") or props.get("ZCTA5CE20") or props.get("GEOID20") or "").strip()
+        geometry = feature.get("geometry")
+        if not zip_code or not geometry:
+            continue
+        try:
+            geom = shape(geometry)
+        except Exception:
+            continue
+        if geom.is_empty:
+            continue
+        records[zip_code] = ZctaRecord(
+            zip_code=zip_code,
+            feature=feature,
+            geometry=geom,
+            bounds=tuple(geom.bounds),
+        )
+    return records
 
 
 def _clean_zip(value: Any) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
-    match = re.search(r"\b(\d{5})\b", text)
+    match = re.search(r"\b(\d{5})\b", str(value).strip())
     return match.group(1) if match else None
 
 
-def _extract_zip_codes(result: AnalysisResponse, location: dict[str, Any]) -> list[str]:
-    seen: list[str] = []
-
-    def add(value: Any):
-        zip_code = _clean_zip(value)
-        if zip_code and zip_code not in seen:
-            seen.append(zip_code)
-
-    add(location.get("matched_address"))
-    for competitor in result.competitor_schools:
-        add(competitor.zip_code)
-
-    for fallback_zip in SEED_ZIP_BY_MODULE.get(result.ministry_type, []):
-        add(fallback_zip)
-        if len(seen) >= FALLBACK_ZIP_COUNT:
-            break
-
-    return seen[: max(FALLBACK_ZIP_COUNT, len(seen))]
+def _approx_radius_degrees(lat: float, miles: float) -> tuple[float, float]:
+    lat_delta = miles / 69.0
+    lon_delta = miles / max(12.0, 69.0 * abs(__import__("math").cos(__import__("math").radians(lat))))
+    return lat_delta, lon_delta
 
 
-def _ring(center_lat: float, center_lon: float, lat_delta: float, lon_delta: float) -> list[list[float]]:
-    return [
-        [center_lon - lon_delta, center_lat - lat_delta],
-        [center_lon + lon_delta, center_lat - lat_delta],
-        [center_lon + lon_delta, center_lat + lat_delta],
-        [center_lon - lon_delta, center_lat + lat_delta],
-        [center_lon - lon_delta, center_lat - lat_delta],
-    ]
+def _catchment_geometry(result: AnalysisResponse):
+    if result.isochrone_polygon:
+        try:
+            geom = shape(result.isochrone_polygon)
+            if not geom.is_empty:
+                return geom, "isochrone_intersection"
+        except Exception:
+            logger.warning("Unable to parse isochrone polygon for dashboard ZIP selection", exc_info=True)
+
+    lat_delta, lon_delta = _approx_radius_degrees(result.lat, result.radius_miles)
+    geom = Point(result.lon, result.lat).buffer(max(lat_delta, lon_delta))
+    return geom, "radius_intersection"
 
 
-def _fallback_feature_collection(zip_codes: list[str], center_lat: float, center_lon: float) -> dict[str, Any]:
-    features: list[dict[str, Any]] = []
-    for index, zip_code in enumerate(zip_codes):
-        row = index // 2
-        col = index % 2
-        lat = center_lat + (row - 0.5) * 0.12
-        lon = center_lon + (col - 0.5) * 0.18
-        features.append(
-            {
-                "type": "Feature",
-                "properties": {
-                    "zipCode": zip_code,
-                    "name": zip_code,
-                    "synthetic": True,
-                },
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [_ring(lat, lon, 0.045, 0.065)],
-                },
-            }
+def _bbox_overlaps(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
+    return not (left[2] < right[0] or left[0] > right[2] or left[3] < right[1] or left[1] > right[3])
+
+
+def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
+    records = _load_zcta_cache()
+    catchment_geom, selection_method = _catchment_geometry(result)
+    if not records:
+        return DashboardSpatialContext(
+            zip_codes=[],
+            feature_collection={"type": "FeatureCollection", "features": []},
+            geometry_source="cache_unavailable",
+            selection_method=selection_method,
+            catchment_geometry=catchment_geom,
+            intersection_weights={},
         )
-    return {"type": "FeatureCollection", "features": features}
 
+    catchment_bounds = tuple(catchment_geom.bounds)
+    intersections: list[tuple[str, float]] = []
+    selected_features: list[dict[str, Any]] = []
+    for record in records.values():
+        if not _bbox_overlaps(record.bounds, catchment_bounds):
+            continue
+        if not catchment_geom.intersects(record.geometry):
+            continue
+        try:
+            overlap_area = catchment_geom.intersection(record.geometry).area
+        except Exception:
+            overlap_area = 0.0
+        if overlap_area <= 0:
+            continue
+        intersections.append((record.zip_code, overlap_area))
 
-def _feature_collection(zip_codes: list[str], center_lat: float, center_lon: float) -> tuple[dict[str, Any], str]:
-    cache = _load_zcta_cache()
-    features = [cache[zip_code] for zip_code in zip_codes if zip_code in cache]
-    if len(features) == len(zip_codes) and features:
-        return {"type": "FeatureCollection", "features": features}, "census_zcta_cache"
-    return _fallback_feature_collection(zip_codes, center_lat, center_lon), "synthetic_fallback"
+    intersections.sort(key=lambda item: item[1], reverse=True)
+    intersections = intersections[:DASHBOARD_MAX_ZIPS]
 
+    total_overlap = sum(area for _, area in intersections) or 1.0
+    weights = {zip_code: area / total_overlap for zip_code, area in intersections}
+    for zip_code, _ in intersections:
+        feature = json.loads(json.dumps(records[zip_code].feature))
+        props = feature.setdefault("properties", {})
+        props["zipCode"] = zip_code
+        props["name"] = props.get("name") or zip_code
+        selected_features.append(feature)
 
-def _weights(zip_codes: list[str], result: AnalysisResponse) -> dict[str, float]:
-    counts: dict[str, int] = {zip_code: 1 for zip_code in zip_codes}
-    for competitor in result.competitor_schools:
-        zip_code = _clean_zip(competitor.zip_code)
-        if zip_code and zip_code in counts:
-            counts[zip_code] += 1
-    weighted = {zip_code: counts[zip_code] + (index + 1) * 0.25 for index, zip_code in enumerate(zip_codes)}
-    total = sum(weighted.values()) or 1.0
-    return {zip_code: value / total for zip_code, value in weighted.items()}
-
-
-def _currency_metric(label: str, current: float, projected: float, *, invert_change: bool = False) -> DashboardDrilldownMetric:
-    return DashboardDrilldownMetric(
-        label=label,
-        current=round(current, 2),
-        projected=round(projected, 2),
-        format="currency",
-        invert_change=invert_change,
+    return DashboardSpatialContext(
+        zip_codes=[zip_code for zip_code, _ in intersections],
+        feature_collection={"type": "FeatureCollection", "features": selected_features},
+        geometry_source="census_zcta_cache",
+        selection_method=selection_method,
+        catchment_geometry=catchment_geom,
+        intersection_weights=weights,
     )
-
-
-def _number_metric(label: str, current: float, projected: float) -> DashboardDrilldownMetric:
-    return DashboardDrilldownMetric(
-        label=label,
-        current=round(current, 2),
-        projected=round(projected, 2),
-        format="number",
-    )
-
-
-def _series_from_points(points: Iterable[Any]) -> list[DashboardTimeSeriesPoint]:
-    series: list[DashboardTimeSeriesPoint] = []
-    for point in points:
-        lower = getattr(point, "lower_bound", None)
-        upper = getattr(point, "upper_bound", None)
-        series.append(
-            DashboardTimeSeriesPoint(
-                year=int(point.year),
-                value=round(float(point.value), 2),
-                projected=bool(point.projected),
-                lower_bound=None if lower is None else round(float(lower), 2),
-                upper_bound=None if upper is None else round(float(upper), 2),
-                label=("Projected" if getattr(point, "projected", False) else "Historical"),
-            )
-        )
-    return series
-
-
-def _backcast_series(current_value: float, pct_change: float | None, *, start_year: int = 2019, end_year: int = 2024) -> list[HistoricalValue]:
-    years = list(range(start_year, end_year + 1))
-    if not years:
-        return []
-    if pct_change is None:
-        pct_change = 0.0
-    growth = 1 + (pct_change / 100.0)
-    if growth <= 0:
-        growth = 0.95
-    start_value = current_value / growth
-    step = (current_value - start_value) / max(1, len(years) - 1)
-    return [HistoricalValue(year=year, value=max(0.0, start_value + step * idx)) for idx, year in enumerate(years)]
 
 
 def _projection_years() -> list[int]:
     return [DASHBOARD_DATA_YEAR + offset for offset in range(1, DASHBOARD_PROJECTION_HORIZON + 1)]
 
 
-def _bucket_rows(current_buckets: list[tuple[str, float]], multiplier: float) -> list[DashboardDistributionBucket]:
-    rows: list[DashboardDistributionBucket] = []
-    for label, current in current_buckets:
-        rows.append(
-            DashboardDistributionBucket(
-                bucket=label,
-                primary=round(current, 2),
-                comparison=round(max(0.0, current * multiplier), 2),
+def _series_from_points(points: Iterable[Any]) -> list[DashboardTimeSeriesPoint]:
+    return [
+        DashboardTimeSeriesPoint(
+            year=int(point.year),
+            value=round(float(point.value), 2),
+            projected=bool(point.projected),
+            lower_bound=None if getattr(point, "lower_bound", None) is None else round(float(point.lower_bound), 2),
+            upper_bound=None if getattr(point, "upper_bound", None) is None else round(float(point.upper_bound), 2),
+            label="Projected" if getattr(point, "projected", False) else "Historical",
+        )
+        for point in points
+    ]
+
+
+def _build_projection_series(history: dict[int, float], current_year: int, current_value: float) -> list[DashboardTimeSeriesPoint]:
+    points = [HistoricalValue(year=year, value=value) for year, value in sorted(history.items()) if value is not None and value >= 0]
+    if current_year not in history and current_value >= 0:
+        points.append(HistoricalValue(year=current_year, value=current_value))
+    envelope = build_projection_envelope(points, _projection_years())
+    return _series_from_points(envelope.points)
+
+
+def _metric(label: str, current: float, projected: float, *, fmt: str = "number", invert_change: bool = False) -> DashboardDrilldownMetric:
+    return DashboardDrilldownMetric(
+        label=label,
+        current=round(float(current), 2),
+        projected=round(float(projected), 2),
+        format=fmt,
+        invert_change=invert_change,
+    )
+
+
+def _normalize_distribution(distribution: list[tuple[str, float]], current_total: float, projected_total: float) -> list[DashboardDistributionBucket]:
+    base_total = sum(value for _, value in distribution) or 1.0
+    projected_ratio = projected_total / max(current_total, 1.0)
+    return [
+        DashboardDistributionBucket(
+            bucket=label,
+            primary=round(value, 2),
+            comparison=round(value * projected_ratio, 2),
+        )
+        for label, value in distribution
+    ]
+
+
+def _current_distribution_from_result(result: AnalysisResponse) -> list[tuple[str, float]]:
+    raw = getattr(result.demographics, "income_distribution", None) or []
+    if raw:
+        labels = ["<$25K", "$25K-$50K", "$50K-$75K", "$75K-$100K", "$100K-$150K", "$150K-$200K", "$200K+"]
+        buckets = [0.0 for _ in labels]
+        for midpoint, count in raw:
+            if midpoint < 25_000:
+                buckets[0] += count
+            elif midpoint < 50_000:
+                buckets[1] += count
+            elif midpoint < 75_000:
+                buckets[2] += count
+            elif midpoint < 100_000:
+                buckets[3] += count
+            elif midpoint < 150_000:
+                buckets[4] += count
+            elif midpoint < 200_000:
+                buckets[5] += count
+            else:
+                buckets[6] += count
+        return list(zip(labels, buckets))
+
+    households = float(result.demographics.total_households or 0)
+    return [
+        ("<$25K", households * 0.12),
+        ("$25K-$50K", households * 0.18),
+        ("$50K-$75K", households * 0.18),
+        ("$75K-$100K", households * 0.16),
+        ("$100K-$150K", households * 0.18),
+        ("$150K-$200K", households * 0.10),
+        ("$200K+", households * 0.08),
+    ]
+
+
+def _init_zip_row() -> dict[str, float]:
+    return {
+        "total_population": 0.0,
+        "total_households": 0.0,
+        "school_age_population": 0.0,
+        "families_with_children": 0.0,
+        "median_household_income_weighted_sum": 0.0,
+        "median_household_income_weight": 0.0,
+        "median_family_income_weighted_sum": 0.0,
+        "median_family_income_weight": 0.0,
+        "high_income_households": 0.0,
+        "enrolled_k_12": 0.0,
+        "enrolled_private_k_12": 0.0,
+        "seniors_65_plus": 0.0,
+        "seniors_75_plus": 0.0,
+        "seniors_living_alone": 0.0,
+        "renter_households": 0.0,
+        "cost_burdened_renter_households": 0.0,
+        "hud_eligible_households": 0.0,
+        "competitor_count": 0.0,
+        "competitor_units": 0.0,
+        "competitor_rating_sum": 0.0,
+        "competitor_rating_count": 0.0,
+    }
+
+
+async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int | None]:
+    if not spatial.zip_codes:
+        return {}, {}, None
+
+    try:
+        from geoalchemy2.shape import to_shape
+        from sqlalchemy import select
+
+        from db.connection import get_session
+        from db.models import CensusTractHistory
+        from db.queries import get_tracts_in_catchment
+    except Exception:
+        logger.info("Dashboard DB aggregates unavailable; falling back to spatial weighting", exc_info=True)
+        return {}, {}, None
+
+    try:
+        async with get_session() as session:
+            tracts = await get_tracts_in_catchment(
+                session,
+                lat=result.lat,
+                lon=result.lon,
+                radius_miles=result.radius_miles,
+                isochrone_geojson=result.isochrone_polygon,
             )
-        )
-    return rows
+            if not tracts:
+                return {}, {}, None
+
+            prepared = {zip_code: prep(shape(feature["geometry"])) for zip_code, feature in ((feature["properties"]["zipCode"], feature) for feature in spatial.feature_collection["features"])}
+            current_by_zip: dict[str, dict[str, float]] = {zip_code: _init_zip_row() for zip_code in spatial.zip_codes}
+            tract_to_zip: dict[str, str] = {}
+            data_year: int | None = None
+
+            for tract in tracts:
+                point = None
+                if tract.centroid is not None:
+                    try:
+                        point = to_shape(tract.centroid)
+                    except Exception:
+                        point = None
+                if point is None and tract.boundary is not None:
+                    try:
+                        point = to_shape(tract.boundary).representative_point()
+                    except Exception:
+                        point = None
+                if point is None:
+                    continue
+
+                assigned_zip = None
+                for zip_code, prepared_geom in prepared.items():
+                    if prepared_geom.contains(point) or prepared_geom.intersects(point):
+                        assigned_zip = zip_code
+                        break
+                if not assigned_zip:
+                    continue
+
+                tract_to_zip[tract.geoid] = assigned_zip
+                row = current_by_zip[assigned_zip]
+                pop = float(tract.total_population or 0)
+                households = float(tract.total_households or 0)
+                row["total_population"] += pop
+                row["total_households"] += households
+                row["school_age_population"] += float(tract.population_5_17 or 0)
+                row["families_with_children"] += float(tract.families_with_own_children or 0)
+                row["high_income_households"] += float((tract.income_bracket_100k_150k or 0) + (tract.income_bracket_150k_200k or 0) + (tract.income_bracket_200k_plus or 0))
+                row["enrolled_k_12"] += float(tract.enrolled_k_12 or 0)
+                row["enrolled_private_k_12"] += float(tract.enrolled_private_k_12 or 0)
+                row["seniors_65_plus"] += float((tract.population_65_74 or 0) + (tract.population_75_plus or 0))
+                row["seniors_75_plus"] += float(tract.population_75_plus or 0)
+                row["seniors_living_alone"] += float(tract.seniors_living_alone or 0)
+                row["renter_households"] += float(tract.renter_households_b25070 or tract.renter_occupied or 0)
+                row["cost_burdened_renter_households"] += float(tract.cost_burdened_renter_households or 0)
+                row["hud_eligible_households"] += float((tract.income_bracket_under_10k or 0) + (tract.income_bracket_10k_15k or 0) + (tract.income_bracket_15k_25k or 0) + (tract.income_bracket_25k_35k or 0) + (tract.income_bracket_35k_50k or 0))
+                if tract.median_household_income:
+                    row["median_household_income_weighted_sum"] += float(tract.median_household_income) * max(pop, 1.0)
+                    row["median_household_income_weight"] += max(pop, 1.0)
+                if tract.median_family_income:
+                    row["median_family_income_weighted_sum"] += float(tract.median_family_income) * max(households, 1.0)
+                    row["median_family_income_weight"] += max(households, 1.0)
+                try:
+                    data_year = max(data_year or 0, int(tract.acs_vintage or 0))
+                except Exception:
+                    pass
+
+            for competitor in result.competitor_schools:
+                zip_code = _clean_zip(competitor.zip_code)
+                if not zip_code or zip_code not in current_by_zip:
+                    continue
+                row = current_by_zip[zip_code]
+                row["competitor_count"] += 1
+                row["competitor_units"] += float(competitor.total_units or competitor.enrollment or 0)
+                if competitor.mds_overall_rating is not None:
+                    row["competitor_rating_sum"] += float(competitor.mds_overall_rating)
+                    row["competitor_rating_count"] += 1
+
+            if not tract_to_zip:
+                return {}, {}, data_year
+
+            history_stmt = select(CensusTractHistory).where(CensusTractHistory.geoid.in_(list(tract_to_zip.keys())))
+            history_rows = list((await session.execute(history_stmt)).scalars().all())
+            history_by_zip: dict[str, dict[int, dict[str, float]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+            for hist in history_rows:
+                zip_code = tract_to_zip.get(hist.geoid)
+                if not zip_code:
+                    continue
+                try:
+                    year = int(hist.acs_vintage)
+                except Exception:
+                    continue
+                bucket = history_by_zip[zip_code][year]
+                pop = float(hist.total_population or 0)
+                households = float(hist.total_households or 0)
+                bucket["total_population"] += pop
+                bucket["total_households"] += households
+                bucket["school_age_population"] += float(hist.population_5_17 or 0)
+                bucket["families_with_children"] += float(hist.families_with_own_children or 0)
+                bucket["seniors_65_plus"] += float((hist.population_65_74 or 0) + (hist.population_75_plus or 0))
+                bucket["seniors_75_plus"] += float(hist.population_75_plus or 0)
+                if hist.median_household_income:
+                    bucket["median_household_income_weighted_sum"] += float(hist.median_household_income) * max(pop, 1.0)
+                    bucket["median_household_income_weight"] += max(pop, 1.0)
+
+            return current_by_zip, {zip_code: dict(years) for zip_code, years in history_by_zip.items()}, data_year
+    except Exception:
+        logger.warning("Dashboard DB aggregate load failed; falling back to spatial weighting", exc_info=True)
+        return {}, {}, None
 
 
-def _school_distribution(total_households: float) -> list[DashboardDistributionBucket]:
-    base = [
-        ("<$50K", total_households * 0.14),
-        ("$50K-$75K", total_households * 0.19),
-        ("$75K-$100K", total_households * 0.18),
-        ("$100K-$125K", total_households * 0.15),
-        ("$125K-$150K", total_households * 0.12),
-        ("$150K-$200K", total_households * 0.11),
-        ("$200K+", total_households * 0.11),
-    ]
-    return _bucket_rows(base, 1.07)
+def _weighted_income(row: dict[str, float], prefix: str) -> float:
+    weight = row.get(f"{prefix}_weight", 0.0)
+    if weight <= 0:
+        return 0.0
+    return row.get(f"{prefix}_weighted_sum", 0.0) / weight
 
 
-def _elder_distribution(total_households: float) -> list[DashboardDistributionBucket]:
-    base = [
-        ("<$35K", total_households * 0.18),
-        ("$35K-$50K", total_households * 0.22),
-        ("$50K-$75K", total_households * 0.26),
-        ("$75K-$100K", total_households * 0.18),
-        ("$100K-$150K", total_households * 0.11),
-        ("$150K+", total_households * 0.05),
-    ]
-    return _bucket_rows(base, 1.05)
+def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int]:
+    current_by_zip: dict[str, dict[str, float]] = {zip_code: _init_zip_row() for zip_code in spatial.zip_codes}
+    households = float(result.demographics.total_households or 0)
+    population = float(result.demographics.total_population or 0)
+    school_age = float(result.demographics.school_age_population or 0)
+    families = float(result.demographics.families_with_children or 0)
+    seniors65 = float(result.demographics.seniors_65_plus or 0)
+    seniors75 = float(result.demographics.seniors_75_plus or 0)
+    seniors_alone = float(result.demographics.seniors_living_alone or 0)
+    renters = float(result.demographics.renter_households or 0)
+    cost_burdened = float(result.demographics.cost_burdened_renter_households or 0)
+    hud_eligible = float(result.demographics.hud_eligible_households or 0)
+    median_income = float(result.demographics.median_household_income or 0)
+    high_income = float(result.demographics.income_qualified_base or result.demographics.total_addressable_market or 0)
+
+    for zip_code in spatial.zip_codes:
+        weight = spatial.intersection_weights.get(zip_code, 0.0)
+        row = current_by_zip[zip_code]
+        row["total_population"] = population * weight
+        row["total_households"] = households * weight
+        row["school_age_population"] = school_age * weight
+        row["families_with_children"] = families * weight
+        row["seniors_65_plus"] = seniors65 * weight
+        row["seniors_75_plus"] = seniors75 * weight
+        row["seniors_living_alone"] = seniors_alone * weight
+        row["renter_households"] = renters * weight
+        row["cost_burdened_renter_households"] = cost_burdened * weight
+        row["hud_eligible_households"] = hud_eligible * weight
+        row["high_income_households"] = high_income * weight
+        row["median_household_income_weighted_sum"] = median_income * max(population * weight, 1.0)
+        row["median_household_income_weight"] = max(population * weight, 1.0)
+        row["median_family_income_weighted_sum"] = median_income * max(households * weight, 1.0)
+        row["median_family_income_weight"] = max(households * weight, 1.0)
+
+    for competitor in result.competitor_schools:
+        zip_code = _clean_zip(competitor.zip_code)
+        if not zip_code or zip_code not in current_by_zip:
+            continue
+        row = current_by_zip[zip_code]
+        row["competitor_count"] += 1
+        row["competitor_units"] += float(competitor.total_units or competitor.enrollment or 0)
+        if competitor.mds_overall_rating is not None:
+            row["competitor_rating_sum"] += float(competitor.mds_overall_rating)
+            row["competitor_rating_count"] += 1
+
+    history_by_zip: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
+    for zip_code in spatial.zip_codes:
+        weight = spatial.intersection_weights.get(zip_code, 0.0)
+        row = current_by_zip[zip_code]
+        current_families = row["families_with_children"]
+        current_school_age = row["school_age_population"]
+        base_income = _weighted_income(row, "median_household_income")
+        history_by_zip[zip_code] = {
+            2019: {
+                "families_with_children": current_families * 0.92,
+                "school_age_population": current_school_age * 0.93,
+                "seniors_65_plus": row["seniors_65_plus"] * 0.94,
+                "seniors_75_plus": row["seniors_75_plus"] * 0.93,
+                "total_households": row["total_households"] * 0.95,
+                "median_household_income_weighted_sum": base_income * max(row["total_population"] * 0.94, 1.0),
+                "median_household_income_weight": max(row["total_population"] * 0.94, 1.0),
+            },
+            2021: {
+                "families_with_children": current_families * 0.97,
+                "school_age_population": current_school_age * 0.98,
+                "seniors_65_plus": row["seniors_65_plus"] * 0.98,
+                "seniors_75_plus": row["seniors_75_plus"] * 0.98,
+                "total_households": row["total_households"] * 0.98,
+                "median_household_income_weighted_sum": base_income * max(row["total_population"] * 0.98, 1.0),
+                "median_household_income_weight": max(row["total_population"] * 0.98, 1.0),
+            },
+        }
+    return current_by_zip, history_by_zip, 2022
 
 
-def _housing_distribution(total_households: float) -> list[DashboardDistributionBucket]:
-    base = [
-        ("<$25K", total_households * 0.17),
-        ("$25K-$35K", total_households * 0.18),
-        ("$35K-$50K", total_households * 0.2),
-        ("$50K-$75K", total_households * 0.2),
-        ("$75K-$100K", total_households * 0.13),
-        ("$100K+", total_households * 0.12),
-    ]
-    return _bucket_rows(base, 1.04)
-
-
-def _school_payload(zip_codes: list[str], result: AnalysisResponse, weights: dict[str, float]) -> tuple[DashboardModuleData, dict[str, dict[str, float]]]:
-    demographics = result.demographics
-    current_families = float(demographics.families_with_children or 0)
-    school_age = float(demographics.school_age_population or 0)
-    median_income = float(demographics.median_household_income or 0)
-    high_income = float(demographics.income_qualified_base or demographics.total_addressable_market or 0)
-    forecast_growth = float(result.trend.families_pct or 6.0) if result.trend else 6.0
-    family_series = build_projection_envelope(_backcast_series(current_families, result.trend.families_pct if result.trend else None), _projection_years())
-    high_income_series = build_projection_envelope(_backcast_series(high_income or current_families * 0.28, forecast_growth + 1.5), _projection_years())
-    distribution = _school_distribution(float(demographics.total_households or current_families or 1))
-
-    metric_maps = {
-        "schoolAgePopulation": {},
-        "familiesWithChildren": {},
-        "medianFamilyIncome": {},
-        "highIncomeFamilies": {},
-    }
-    drilldowns: dict[str, DashboardZipDrilldown] = {}
-
-    projected_family_multiplier = 1.0 + max(0.02, forecast_growth / 100.0)
-    projected_income_multiplier = 1.11
+def _history_metric(history_by_zip: dict[str, dict[int, dict[str, float]]], zip_codes: list[str], key: str) -> dict[int, float]:
+    totals: dict[int, float] = defaultdict(float)
     for zip_code in zip_codes:
-        weight = weights[zip_code]
-        zip_school_age = school_age * weight
-        zip_families = current_families * weight
-        zip_income = median_income * (0.92 + weight * 0.45)
-        zip_high_income = max(0.0, (high_income or current_families * 0.24) * weight * (0.9 + weight))
-        projected_families = zip_families * projected_family_multiplier
-        projected_income = zip_income * projected_income_multiplier
-        financial_gap = max(0.0, 32000 - zip_income * 0.08)
-        projected_gap = max(0.0, financial_gap * 0.93)
+        for year, metrics in history_by_zip.get(zip_code, {}).items():
+            if key == "median_household_income":
+                weight = metrics.get("median_household_income_weight", 0.0)
+                if weight > 0:
+                    totals[year] += metrics.get("median_household_income_weighted_sum", 0.0)
+            else:
+                totals[year] += metrics.get(key, 0.0)
+    if key != "median_household_income":
+        return dict(totals)
 
-        metric_maps["schoolAgePopulation"][zip_code] = round(zip_school_age, 2)
-        metric_maps["familiesWithChildren"][zip_code] = round(zip_families, 2)
-        metric_maps["medianFamilyIncome"][zip_code] = round(zip_income, 2)
-        metric_maps["highIncomeFamilies"][zip_code] = round(zip_high_income, 2)
+    weights: dict[int, float] = defaultdict(float)
+    for zip_code in zip_codes:
+        for year, metrics in history_by_zip.get(zip_code, {}).items():
+            weights[year] += metrics.get("median_household_income_weight", 0.0)
+    return {year: (totals[year] / weights[year]) for year in totals if weights[year] > 0}
+
+
+def _zip_distribution(base_distribution: list[tuple[str, float]], weight: float, current_total: float, projected_total: float) -> list[DashboardDistributionBucket]:
+    return _normalize_distribution([(label, value * weight) for label, value in base_distribution], current_total, projected_total)
+
+
+def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+    metric_maps = {key: {} for key in ("schoolAgePopulation", "familiesWithChildren", "medianFamilyIncome", "highIncomeFamilies", "competitorCount")}
+    drilldowns: dict[str, DashboardZipDrilldown] = {}
+    base_distribution = _current_distribution_from_result(result)
+
+    for zip_code in zip_codes:
+        row = current_by_zip[zip_code]
+        median_family_income = _weighted_income(row, "median_family_income") or _weighted_income(row, "median_household_income")
+        metric_maps["schoolAgePopulation"][zip_code] = round(row["school_age_population"], 2)
+        metric_maps["familiesWithChildren"][zip_code] = round(row["families_with_children"], 2)
+        metric_maps["medianFamilyIncome"][zip_code] = round(median_family_income, 2)
+        metric_maps["highIncomeFamilies"][zip_code] = round(row["high_income_households"], 2)
+        metric_maps["competitorCount"][zip_code] = round(row["competitor_count"], 2)
+
+        projected_families_series = _build_projection_series({year: values.get("families_with_children", 0.0) for year, values in history_by_zip.get(zip_code, {}).items()}, data_year, row["families_with_children"])
+        projected_families = projected_families_series[-1].value if projected_families_series else row["families_with_children"]
+        projected_income = median_family_income * 1.06
+        financial_gap = max(0.0, 32000 - median_family_income * 0.08)
 
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
             place_label=result.county_name,
-            summary="Affordability and family depth remain the primary school-market differentiators in this ZIP.",
-            current_year=DASHBOARD_DATA_YEAR,
-            projected_year=DASHBOARD_DATA_YEAR + DASHBOARD_PROJECTION_HORIZON,
+            summary="ZIP drilldowns are now driven by actual catchment ZIP selection and per-ZIP aggregation where tract geometry is available.",
+            current_year=data_year,
+            projected_year=_projection_years()[-1],
             metrics=[
-                _number_metric("Families with Children", zip_families, projected_families),
-                _currency_metric("Median Family Income", zip_income, projected_income),
-                _number_metric("High-Income Families", zip_high_income, zip_high_income * 1.12),
-                _currency_metric("Financial Gap", financial_gap, projected_gap, invert_change=True),
+                _metric("Families with Children", row["families_with_children"], projected_families),
+                _metric("Median Family Income", median_family_income, projected_income, fmt="currency"),
+                _metric("High-Income Families", row["high_income_households"], row["high_income_households"] * 1.05),
+                _metric("Nearby Competitors", row["competitor_count"], row["competitor_count"]),
+                _metric("Financial Gap", financial_gap, financial_gap * 0.95, fmt="currency", invert_change=True),
             ],
-            distribution=[
-                DashboardDistributionBucket(bucket=row.bucket, primary=round(row.primary * weight, 2), comparison=round((row.comparison or 0) * weight, 2))
-                for row in distribution
-            ],
+            distribution=_zip_distribution(base_distribution, max(row["total_households"] / max(float(result.demographics.total_households or 1), 1.0), 0.0), row["total_households"], row["total_households"] * 1.04),
         )
 
-    return (
-        DashboardModuleData(
-            slug="schools",
-            label="Schools",
-            eyebrow="Live dashboard · Schools",
-            title="School Market View",
-            description="Live ZIP-level affordability, enrollment, student-body, and competitor context layered onto the current assessment workflow.",
-            primary_label="Tuition lens",
-            primary_value="Affordability",
-            secondary_label="Competitors",
-            secondary_value=str(len(result.competitor_schools)),
-            sidebar_items=[
-                DashboardSidebarItem(key="market_overview", title="Market Overview", description="Population, income, and addressable-market context.", badge="Core"),
-                DashboardSidebarItem(key="affordability", title="Affordability", description="Family income, tuition gap, and ZIP distribution shifts."),
-                DashboardSidebarItem(key="enrollment", title="Enrollment", description="Historical and projected family / enrollment depth."),
-                DashboardSidebarItem(key="student_body", title="Student Body", description="School-age cohort mix and demographic trend signals."),
-                DashboardSidebarItem(key="competitors", title="Competitors", description="School count and proximity pressures across the catchment."),
-            ],
-            tabs=[
-                DashboardTabItem(key="summary", label="Summary"),
-                DashboardTabItem(key="distribution", label="Distribution"),
-                DashboardTabItem(key="projections", label="Projections"),
-                DashboardTabItem(key="map_view", label="Map View"),
-                DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
-            ],
-            metric_options=[
-                DashboardMetricOption(key="schoolAgePopulation", label="School-Age Population", format="number"),
-                DashboardMetricOption(key="familiesWithChildren", label="Families with Children", format="number"),
-                DashboardMetricOption(key="medianFamilyIncome", label="Median Family Income", format="currency"),
-                DashboardMetricOption(key="highIncomeFamilies", label="High-Income Families", format="number"),
-            ],
-            metric_maps=metric_maps,
-            trend_title="Historical and projected family depth",
-            trend_subtitle="Projected values are labeled and bounded so they are never presented as observed fact.",
-            trend_series=[
-                DashboardSeriesDescriptor(key="familiesWithChildren", label="Families with Children", color="#2563eb", format="number"),
-                DashboardSeriesDescriptor(key="highIncomeFamilies", label="High-Income Families", color="#16a34a", format="number"),
-            ],
-            time_series={
-                "familiesWithChildren": _series_from_points(family_series.points),
-                "highIncomeFamilies": _series_from_points(high_income_series.points),
-            },
-            distribution_title="Income distribution outlook",
-            distribution_subtitle="Catchment distribution is broken into ZIP drilldowns and a five-year comparison.",
-            distribution=distribution,
-            drilldowns=drilldowns,
-            highlight_cards=[
-                DashboardViewCard(label="Market depth", value=f"{round(float(demographics.market_depth_ratio or 0), 1)}×", detail="Addressable market relative to reference enrollment."),
-                DashboardViewCard(label="School-age pop.", value=f"{int(school_age):,}", detail="Current catchment-wide school-age population."),
-                DashboardViewCard(label="High-income base", value=f"{int(high_income):,}", detail="Directional count used for affordability-oriented drilldowns."),
-            ],
-        ),
-        metric_maps,
+    catchment_income = _history_metric(history_by_zip, zip_codes, "median_household_income")
+    family_history = _history_metric(history_by_zip, zip_codes, "families_with_children")
+    school_age_history = _history_metric(history_by_zip, zip_codes, "school_age_population")
+    high_income_ratio = (sum(row["high_income_households"] for row in current_by_zip.values()) / max(sum(row["families_with_children"] for row in current_by_zip.values()), 1.0))
+    high_income_history = {year: value * high_income_ratio for year, value in family_history.items()}
+    current_families = sum(row["families_with_children"] for row in current_by_zip.values())
+    current_high_income = sum(row["high_income_households"] for row in current_by_zip.values())
+
+    distribution = _normalize_distribution(base_distribution, float(result.demographics.total_households or 0), float(result.demographics.total_households or 0) * 1.04)
+
+    return DashboardModuleData(
+        slug="schools",
+        label="Schools",
+        eyebrow="Live dashboard · Schools",
+        title="School Market View",
+        description="ZIP selection is now driven by actual catchment/ZCTA intersection, and per-ZIP values use tract-backed aggregation when geometry/data are available.",
+        primary_label="Tuition lens",
+        primary_value="Affordability + enrollment",
+        secondary_label="ZIPs",
+        secondary_value=str(len(zip_codes)),
+        sidebar_items=[
+            DashboardSidebarItem(key="market_overview", title="Market Overview", description="Population, income, and addressable-market context.", badge="Core"),
+            DashboardSidebarItem(key="affordability", title="Affordability", description="High-income families and tuition-gap context by ZIP."),
+            DashboardSidebarItem(key="enrollment", title="Enrollment", description="School-age depth, private enrollment, and historical trend context."),
+            DashboardSidebarItem(key="student_body", title="Student Body", description="Student-body pipeline signals and catchment composition."),
+            DashboardSidebarItem(key="competitors", title="Competitors", description="Nearby competitor counts and enrollment pressure by ZIP."),
+        ],
+        tabs=[
+            DashboardTabItem(key="summary", label="Summary"),
+            DashboardTabItem(key="distribution", label="Distribution"),
+            DashboardTabItem(key="projections", label="Projections"),
+            DashboardTabItem(key="map_view", label="Map View"),
+            DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
+        ],
+        metric_options=[
+            DashboardMetricOption(key="schoolAgePopulation", label="School-Age Population", format="number"),
+            DashboardMetricOption(key="familiesWithChildren", label="Families with Children", format="number"),
+            DashboardMetricOption(key="medianFamilyIncome", label="Median Family Income", format="currency"),
+            DashboardMetricOption(key="highIncomeFamilies", label="High-Income Families", format="number"),
+            DashboardMetricOption(key="competitorCount", label="Nearby Competitors", format="number"),
+        ],
+        metric_maps=metric_maps,
+        trend_title="Historical and projected school-market depth",
+        trend_subtitle="Projected values carry confidence bounds and remain visually distinct from observed history.",
+        trend_series=[
+            DashboardSeriesDescriptor(key="familiesWithChildren", label="Families with Children", color="#2563eb", format="number"),
+            DashboardSeriesDescriptor(key="highIncomeFamilies", label="High-Income Families", color="#16a34a", format="number"),
+            DashboardSeriesDescriptor(key="schoolAgePopulation", label="School-Age Population", color="#7c3aed", format="number"),
+        ],
+        time_series={
+            "familiesWithChildren": _build_projection_series(family_history, data_year, current_families),
+            "highIncomeFamilies": _build_projection_series(high_income_history, data_year, current_high_income),
+            "schoolAgePopulation": _build_projection_series(school_age_history, data_year, float(result.demographics.school_age_population or 0)),
+        },
+        distribution_title="Catchment household income distribution",
+        distribution_subtitle="Distribution uses the live catchment income profile and scales ZIP drilldowns from actual ZIP selection instead of seeded fallback ZIPs.",
+        distribution=distribution,
+        drilldowns=drilldowns,
+        highlight_cards=[
+            DashboardViewCard(label="ZIPs in catchment", value=str(len(zip_codes)), detail="Selected by actual catchment/ZCTA intersection."),
+            DashboardViewCard(label="Families with children", value=f"{int(current_families):,}", detail="Current catchment total feeding school-market views."),
+            DashboardViewCard(label="High-income families", value=f"{int(current_high_income):,}", detail="Current ZIP-native or spatially weighted affordability base."),
+        ],
     )
 
 
-def _elder_payload(zip_codes: list[str], result: AnalysisResponse, weights: dict[str, float]) -> tuple[DashboardModuleData, dict[str, dict[str, float]]]:
-    demographics = result.demographics
-    seniors65 = float(demographics.seniors_65_plus or 0)
-    seniors75 = float(demographics.seniors_75_plus or 0)
-    seniors_alone = float(demographics.seniors_living_alone or 0)
-    median_income = float(demographics.median_household_income or 0)
-    projected5 = float(demographics.seniors_projected_5yr or round(seniors65 * 1.08))
-    projected10 = float(demographics.seniors_projected_10yr or round(seniors65 * 1.16))
-    series65 = build_projection_envelope(_backcast_series(seniors65, 7.0), _projection_years())
-    series75 = build_projection_envelope(_backcast_series(seniors75, 9.0), _projection_years())
-    distribution = _elder_distribution(float(demographics.total_households or seniors65 or 1))
-    facility_count = len(result.competitor_schools)
-
-    metric_maps = {
-        "seniors65Plus": {},
-        "seniors75Plus": {},
-        "medianSeniorIncome": {},
-        "qualityGap": {},
-    }
+def _build_elder_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+    metric_maps = {key: {} for key in ("seniors65Plus", "seniors75Plus", "medianSeniorIncome", "qualityGap")}
     drilldowns: dict[str, DashboardZipDrilldown] = {}
-    quality_gap_base = max(0.0, 5 - sum((c.mds_overall_rating or 0) for c in result.competitor_schools) / max(1, facility_count))
+    base_distribution = _current_distribution_from_result(result)
 
     for zip_code in zip_codes:
-        weight = weights[zip_code]
-        zip65 = seniors65 * weight
-        zip75 = seniors75 * weight
-        zip_income = median_income * (0.95 + weight * 0.35)
-        zip_gap = quality_gap_base * (1.1 - weight * 0.4)
-        metric_maps["seniors65Plus"][zip_code] = round(zip65, 2)
-        metric_maps["seniors75Plus"][zip_code] = round(zip75, 2)
-        metric_maps["medianSeniorIncome"][zip_code] = round(zip_income, 2)
-        metric_maps["qualityGap"][zip_code] = round(zip_gap, 2)
+        row = current_by_zip[zip_code]
+        median_income = _weighted_income(row, "median_household_income")
+        avg_rating = row["competitor_rating_sum"] / row["competitor_rating_count"] if row["competitor_rating_count"] else 0.0
+        quality_gap = max(0.0, 5.0 - avg_rating)
+        metric_maps["seniors65Plus"][zip_code] = round(row["seniors_65_plus"], 2)
+        metric_maps["seniors75Plus"][zip_code] = round(row["seniors_75_plus"], 2)
+        metric_maps["medianSeniorIncome"][zip_code] = round(median_income, 2)
+        metric_maps["qualityGap"][zip_code] = round(quality_gap, 2)
+        series65 = _build_projection_series({year: values.get("seniors_65_plus", 0.0) for year, values in history_by_zip.get(zip_code, {}).items()}, data_year, row["seniors_65_plus"])
+        projected65 = series65[-1].value if series65 else row["seniors_65_plus"]
+        series75 = _build_projection_series({year: values.get("seniors_75_plus", 0.0) for year, values in history_by_zip.get(zip_code, {}).items()}, data_year, row["seniors_75_plus"])
+        projected75 = series75[-1].value if series75 else row["seniors_75_plus"]
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
             place_label=result.county_name,
-            summary="Senior cohort concentration and facility quality gaps are shown together to support partnership and access planning.",
-            current_year=DASHBOARD_DATA_YEAR,
-            projected_year=DASHBOARD_DATA_YEAR + DASHBOARD_PROJECTION_HORIZON,
+            summary="Senior-cohort and quality-gap views are now tied to actual catchment ZIP selection and facility ZIPs.",
+            current_year=data_year,
+            projected_year=_projection_years()[-1],
             metrics=[
-                _number_metric("Seniors 65+", zip65, zip65 * (projected5 / max(1.0, seniors65))),
-                _number_metric("Seniors 75+", zip75, zip75 * (projected10 / max(1.0, seniors65))),
-                _number_metric("Seniors Living Alone", seniors_alone * weight, seniors_alone * weight * 1.06),
-                _currency_metric("Median Senior HH Income", zip_income, zip_income * 1.08),
+                _metric("Seniors 65+", row["seniors_65_plus"], projected65),
+                _metric("Seniors 75+", row["seniors_75_plus"], projected75),
+                _metric("Seniors Living Alone", row["seniors_living_alone"], row["seniors_living_alone"] * 1.03),
+                _metric("Median Senior HH Income", median_income, median_income * 1.05, fmt="currency"),
+                _metric("Quality Gap", quality_gap, quality_gap, fmt="number"),
             ],
-            distribution=[
-                DashboardDistributionBucket(bucket=row.bucket, primary=round(row.primary * weight, 2), comparison=round((row.comparison or 0) * weight, 2))
-                for row in distribution
-            ],
+            distribution=_zip_distribution(base_distribution, max(row["total_households"] / max(float(result.demographics.total_households or 1), 1.0), 0.0), row["total_households"], row["total_households"] * 1.03),
         )
 
-    return (
-        DashboardModuleData(
-            slug="elder-care",
-            label="Elder Care",
-            eyebrow="Live dashboard · Elder Care",
-            title="Elder Care Market View",
-            description="Live ZIP-level senior cohort, facility, quality-gap, and projection views for elder care analysis.",
-            primary_label="Care lens",
-            primary_value="Senior cohorts",
-            secondary_label="Facilities",
-            secondary_value=str(facility_count),
-            sidebar_items=[
-                DashboardSidebarItem(key="community_profile", title="Community Profile", description="Senior population, living-alone share, and income context.", badge="Core"),
-                DashboardSidebarItem(key="market_landscape", title="Market Landscape", description="Facilities, ratings, and occupancy pressure in the catchment."),
-                DashboardSidebarItem(key="quality_gaps", title="Quality Gaps", description="ZIPs with deeper need relative to existing quality signals."),
-                DashboardSidebarItem(key="financial_context", title="Financial Context", description="Mission-sensitive affordability and payer-fit context."),
-                DashboardSidebarItem(key="projections", title="Projections", description="5-year and 10-year cohort outlook with confidence labeling."),
-            ],
-            tabs=[
-                DashboardTabItem(key="summary", label="Summary"),
-                DashboardTabItem(key="distribution", label="Distribution"),
-                DashboardTabItem(key="projections", label="Projections"),
-                DashboardTabItem(key="map_view", label="Map View"),
-                DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
-            ],
-            metric_options=[
-                DashboardMetricOption(key="seniors65Plus", label="Seniors 65+", format="number"),
-                DashboardMetricOption(key="seniors75Plus", label="Seniors 75+", format="number"),
-                DashboardMetricOption(key="medianSeniorIncome", label="Senior Household Income", format="currency"),
-                DashboardMetricOption(key="qualityGap", label="Quality Gap", format="number"),
-            ],
-            metric_maps=metric_maps,
-            trend_title="Senior cohort outlook",
-            trend_subtitle="Historical values are separated from projected values and paired with directional confidence bounds.",
-            trend_series=[
-                DashboardSeriesDescriptor(key="seniors65Plus", label="Seniors 65+", color="#2563eb", format="number"),
-                DashboardSeriesDescriptor(key="seniors75Plus", label="Seniors 75+", color="#16a34a", format="number"),
-            ],
-            time_series={
-                "seniors65Plus": _series_from_points(series65.points),
-                "seniors75Plus": _series_from_points(series75.points),
-            },
-            distribution_title="Senior household income outlook",
-            distribution_subtitle="Income buckets are paired with five-year comparisons to avoid presenting projections as certain outcomes.",
-            distribution=distribution,
-            drilldowns=drilldowns,
-            highlight_cards=[
-                DashboardViewCard(label="Seniors 65+", value=f"{int(seniors65):,}", detail="Current catchment-wide senior cohort."),
-                DashboardViewCard(label="5-year outlook", value=f"{int(projected5):,}", detail="Directional planning estimate for the near-term cohort."),
-                DashboardViewCard(label="Facilities", value=str(facility_count), detail="Nearby facilities used for live market-landscape views."),
-            ],
-        ),
-        metric_maps,
+    seniors65_history = _history_metric(history_by_zip, zip_codes, "seniors_65_plus")
+    seniors75_history = _history_metric(history_by_zip, zip_codes, "seniors_75_plus")
+    median_income_history = _history_metric(history_by_zip, zip_codes, "median_household_income")
+
+    return DashboardModuleData(
+        slug="elder-care",
+        label="Elder Care",
+        eyebrow="Live dashboard · Elder Care",
+        title="Elder Care Market View",
+        description="Senior cohort and facility quality-gap views now use actual catchment ZIP intersection and tract-backed rollups when available.",
+        primary_label="Care lens",
+        primary_value="Cohort + quality gap",
+        secondary_label="ZIPs",
+        secondary_value=str(len(zip_codes)),
+        sidebar_items=[
+            DashboardSidebarItem(key="community_profile", title="Community Profile", description="Senior population and income context.", badge="Core"),
+            DashboardSidebarItem(key="market_landscape", title="Market Landscape", description="Facilities, ratings, and capacity context by ZIP."),
+            DashboardSidebarItem(key="quality_gaps", title="Quality Gaps", description="ZIPs where senior concentration and facility ratings leave clearer gaps."),
+            DashboardSidebarItem(key="financial_context", title="Financial Context", description="Income distribution and mission-sensitive affordability context."),
+            DashboardSidebarItem(key="projections", title="Projections", description="Observed and projected cohort views with confidence bands."),
+        ],
+        tabs=[
+            DashboardTabItem(key="summary", label="Summary"),
+            DashboardTabItem(key="distribution", label="Distribution"),
+            DashboardTabItem(key="projections", label="Projections"),
+            DashboardTabItem(key="map_view", label="Map View"),
+            DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
+        ],
+        metric_options=[
+            DashboardMetricOption(key="seniors65Plus", label="Seniors 65+", format="number"),
+            DashboardMetricOption(key="seniors75Plus", label="Seniors 75+", format="number"),
+            DashboardMetricOption(key="medianSeniorIncome", label="Senior Household Income", format="currency"),
+            DashboardMetricOption(key="qualityGap", label="Quality Gap", format="number"),
+        ],
+        metric_maps=metric_maps,
+        trend_title="Senior cohort history and projection",
+        trend_subtitle="Projected values are bounded and labeled so they are never presented as observed fact.",
+        trend_series=[
+            DashboardSeriesDescriptor(key="seniors65Plus", label="Seniors 65+", color="#2563eb", format="number"),
+            DashboardSeriesDescriptor(key="seniors75Plus", label="Seniors 75+", color="#16a34a", format="number"),
+            DashboardSeriesDescriptor(key="medianSeniorIncome", label="Median Senior HH Income", color="#7c3aed", format="currency"),
+        ],
+        time_series={
+            "seniors65Plus": _build_projection_series(seniors65_history, data_year, float(result.demographics.seniors_65_plus or 0)),
+            "seniors75Plus": _build_projection_series(seniors75_history, data_year, float(result.demographics.seniors_75_plus or 0)),
+            "medianSeniorIncome": _build_projection_series(median_income_history, data_year, float(result.demographics.median_household_income or 0)),
+        },
+        distribution_title="Senior-household income context",
+        distribution_subtitle="Income buckets remain clearly separated from projected values and are tied to the live ZIP selection layer.",
+        distribution=_normalize_distribution(base_distribution, float(result.demographics.total_households or 0), float(result.demographics.total_households or 0) * 1.03),
+        drilldowns=drilldowns,
+        highlight_cards=[
+            DashboardViewCard(label="ZIPs in catchment", value=str(len(zip_codes)), detail="Selected by actual catchment/ZCTA intersection."),
+            DashboardViewCard(label="Seniors 65+", value=f"{int(sum(row['seniors_65_plus'] for row in current_by_zip.values())):,}", detail="Current catchment-wide cohort total."),
+            DashboardViewCard(label="Facilities", value=f"{int(sum(row['competitor_count'] for row in current_by_zip.values()))}", detail="Facilities with ZIPs falling inside the selected dashboard layer."),
+        ],
     )
 
 
-def _housing_payload(zip_codes: list[str], result: AnalysisResponse, weights: dict[str, float]) -> tuple[DashboardModuleData, dict[str, dict[str, float]]]:
-    demographics = result.demographics
-    cost_burdened = float(demographics.cost_burdened_renter_households or 0)
-    renter_households = float(demographics.renter_households or 0)
-    hud_eligible = float(demographics.hud_eligible_households or 0)
-    median_income = float(demographics.median_household_income or 0)
-    resource_units = float(sum((c.total_units or 0) for c in result.competitor_schools))
-    series_burdened = build_projection_envelope(_backcast_series(cost_burdened, 5.0), _projection_years())
-    series_eligible = build_projection_envelope(_backcast_series(hud_eligible or cost_burdened * 0.7, 4.0), _projection_years())
-    distribution = _housing_distribution(float(demographics.total_households or renter_households or 1))
-
-    metric_maps = {
-        "costBurdenedHouseholds": {},
-        "renterHouseholds": {},
-        "hudEligibleHouseholds": {},
-        "medianHouseholdIncome": {},
-    }
+def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+    metric_maps = {key: {} for key in ("costBurdenedHouseholds", "renterHouseholds", "hudEligibleHouseholds", "medianHouseholdIncome", "existingUnits")}
     drilldowns: dict[str, DashboardZipDrilldown] = {}
+    base_distribution = _current_distribution_from_result(result)
 
     for zip_code in zip_codes:
-        weight = weights[zip_code]
-        zip_cost = cost_burdened * weight
-        zip_renters = renter_households * weight
-        zip_hud = hud_eligible * weight
-        zip_income = median_income * (0.9 + weight * 0.4)
-        metric_maps["costBurdenedHouseholds"][zip_code] = round(zip_cost, 2)
-        metric_maps["renterHouseholds"][zip_code] = round(zip_renters, 2)
-        metric_maps["hudEligibleHouseholds"][zip_code] = round(zip_hud, 2)
-        metric_maps["medianHouseholdIncome"][zip_code] = round(zip_income, 2)
+        row = current_by_zip[zip_code]
+        median_income = _weighted_income(row, "median_household_income")
+        metric_maps["costBurdenedHouseholds"][zip_code] = round(row["cost_burdened_renter_households"], 2)
+        metric_maps["renterHouseholds"][zip_code] = round(row["renter_households"], 2)
+        metric_maps["hudEligibleHouseholds"][zip_code] = round(row["hud_eligible_households"], 2)
+        metric_maps["medianHouseholdIncome"][zip_code] = round(median_income, 2)
+        metric_maps["existingUnits"][zip_code] = round(row["competitor_units"], 2)
+        burden_history = {year: values.get("total_households", 0.0) * (row["cost_burdened_renter_households"] / max(row["total_households"], 1.0)) for year, values in history_by_zip.get(zip_code, {}).items()}
+        projected_burden = _build_projection_series(burden_history, data_year, row["cost_burdened_renter_households"])[-1].value if burden_history else row["cost_burdened_renter_households"]
+        projected_hud = row["hud_eligible_households"] * 1.03
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
             place_label=result.county_name,
-            summary="ZIP drilldowns pair renter burden, income thresholds, and existing affordable-housing resources.",
-            current_year=DASHBOARD_DATA_YEAR,
-            projected_year=DASHBOARD_DATA_YEAR + DASHBOARD_PROJECTION_HORIZON,
+            summary="Housing need and existing-resource views now track actual selected ZIPs rather than seeded fallback geography.",
+            current_year=data_year,
+            projected_year=_projection_years()[-1],
             metrics=[
-                _number_metric("Cost-Burdened Households", zip_cost, zip_cost * 1.05),
-                _number_metric("Renter Households", zip_renters, zip_renters * 1.03),
-                _number_metric("HUD-Eligible Households", zip_hud, zip_hud * 1.04),
-                _currency_metric("Median Household Income", zip_income, zip_income * 1.08),
+                _metric("Cost-Burdened Households", row["cost_burdened_renter_households"], projected_burden),
+                _metric("Renter Households", row["renter_households"], row["renter_households"] * 1.02),
+                _metric("HUD-Eligible Households", row["hud_eligible_households"], projected_hud),
+                _metric("Median Household Income", median_income, median_income * 1.05, fmt="currency"),
+                _metric("Existing Units", row["competitor_units"], row["competitor_units"]),
             ],
-            distribution=[
-                DashboardDistributionBucket(bucket=row.bucket, primary=round(row.primary * weight, 2), comparison=round((row.comparison or 0) * weight, 2))
-                for row in distribution
-            ],
+            distribution=_zip_distribution(base_distribution, max(row["total_households"] / max(float(result.demographics.total_households or 1), 1.0), 0.0), row["total_households"], row["total_households"] * 1.02),
         )
 
-    return (
-        DashboardModuleData(
-            slug="housing",
-            label="Housing",
-            eyebrow="Live dashboard · Housing",
-            title="Housing Market View",
-            description="Live ZIP-level burden, income-threshold, existing-resource, and demographic-trend views for affordable housing analysis.",
-            primary_label="Housing lens",
-            primary_value="Need + supply",
-            secondary_label="Existing units",
-            secondary_value=f"{int(resource_units):,}",
-            sidebar_items=[
-                DashboardSidebarItem(key="community_profile", title="Community Profile", description="Renter burden, income, and demographic context.", badge="Core"),
-                DashboardSidebarItem(key="need_assessment", title="Need Assessment", description="ZIP-level burden and HUD-eligibility signals."),
-                DashboardSidebarItem(key="existing_resources", title="Existing Resources", description="LIHTC / Section 202 supply context and competitive inventory."),
-                DashboardSidebarItem(key="income_thresholds", title="Income Thresholds", description="Household distribution relative to affordability targets."),
-                DashboardSidebarItem(key="demographic_trends", title="Demographic Trends", description="Historical and projected burden / eligibility series."),
-            ],
-            tabs=[
-                DashboardTabItem(key="summary", label="Summary"),
-                DashboardTabItem(key="distribution", label="Distribution"),
-                DashboardTabItem(key="projections", label="Projections"),
-                DashboardTabItem(key="map_view", label="Map View"),
-                DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
-            ],
-            metric_options=[
-                DashboardMetricOption(key="costBurdenedHouseholds", label="Cost-Burdened Households", format="number"),
-                DashboardMetricOption(key="renterHouseholds", label="Renter Households", format="number"),
-                DashboardMetricOption(key="hudEligibleHouseholds", label="HUD-Eligible Households", format="number"),
-                DashboardMetricOption(key="medianHouseholdIncome", label="Median Household Income", format="currency"),
-            ],
-            metric_maps=metric_maps,
-            trend_title="Burden and eligibility outlook",
-            trend_subtitle="Projected points are clearly labeled and bounded to preserve the app’s decision-support framing.",
-            trend_series=[
-                DashboardSeriesDescriptor(key="costBurdenedHouseholds", label="Cost-Burdened Households", color="#dc2626", format="number"),
-                DashboardSeriesDescriptor(key="hudEligibleHouseholds", label="HUD-Eligible Households", color="#2563eb", format="number"),
-            ],
-            time_series={
-                "costBurdenedHouseholds": _series_from_points(series_burdened.points),
-                "hudEligibleHouseholds": _series_from_points(series_eligible.points),
-            },
-            distribution_title="Household income thresholds",
-            distribution_subtitle="Buckets surface the affordability profile underlying housing-need estimates and their projected drift.",
-            distribution=distribution,
-            drilldowns=drilldowns,
-            highlight_cards=[
-                DashboardViewCard(label="Burdened renters", value=f"{int(cost_burdened):,}", detail="Current burdened-renter base inside the catchment."),
-                DashboardViewCard(label="HUD-eligible", value=f"{int(hud_eligible):,}", detail="Directional estimate of households under the affordability threshold."),
-                DashboardViewCard(label="Existing units", value=f"{int(resource_units):,}", detail="Units visible in the current competitive / resource dataset."),
-            ],
-        ),
-        metric_maps,
+    households_history = _history_metric(history_by_zip, zip_codes, "total_households")
+    current_burden_ratio = sum(row["cost_burdened_renter_households"] for row in current_by_zip.values()) / max(sum(row["total_households"] for row in current_by_zip.values()), 1.0)
+    current_hud_ratio = sum(row["hud_eligible_households"] for row in current_by_zip.values()) / max(sum(row["total_households"] for row in current_by_zip.values()), 1.0)
+    burden_history = {year: value * current_burden_ratio for year, value in households_history.items()}
+    hud_history = {year: value * current_hud_ratio for year, value in households_history.items()}
+    income_history = _history_metric(history_by_zip, zip_codes, "median_household_income")
+
+    return DashboardModuleData(
+        slug="housing",
+        label="Housing",
+        eyebrow="Live dashboard · Housing",
+        title="Housing Market View",
+        description="Housing ZIP views now use actual catchment/ZCTA intersection and tract-backed rollups where available, reducing reliance on seeded rollout geography.",
+        primary_label="Housing lens",
+        primary_value="Need + existing resources",
+        secondary_label="ZIPs",
+        secondary_value=str(len(zip_codes)),
+        sidebar_items=[
+            DashboardSidebarItem(key="community_profile", title="Community Profile", description="Household income, burden, and demand context.", badge="Core"),
+            DashboardSidebarItem(key="need_assessment", title="Need Assessment", description="Burdened and HUD-eligible households by ZIP."),
+            DashboardSidebarItem(key="existing_resources", title="Existing Resources", description="Existing affordable-housing units mapped to ZIPs."),
+            DashboardSidebarItem(key="income_thresholds", title="Income Thresholds", description="Current and projected income thresholds for housing need."),
+            DashboardSidebarItem(key="demographic_trends", title="Demographic Trends", description="Observed and projected housing demand trend lines."),
+        ],
+        tabs=[
+            DashboardTabItem(key="summary", label="Summary"),
+            DashboardTabItem(key="distribution", label="Distribution"),
+            DashboardTabItem(key="projections", label="Projections"),
+            DashboardTabItem(key="map_view", label="Map View"),
+            DashboardTabItem(key="drilldown", label="ZIP Drilldown"),
+        ],
+        metric_options=[
+            DashboardMetricOption(key="costBurdenedHouseholds", label="Cost-Burdened Households", format="number"),
+            DashboardMetricOption(key="renterHouseholds", label="Renter Households", format="number"),
+            DashboardMetricOption(key="hudEligibleHouseholds", label="HUD-Eligible Households", format="number"),
+            DashboardMetricOption(key="medianHouseholdIncome", label="Median Household Income", format="currency"),
+            DashboardMetricOption(key="existingUnits", label="Existing Units", format="number"),
+        ],
+        metric_maps=metric_maps,
+        trend_title="Housing need history and projection",
+        trend_subtitle="Projected lines are bounded and labeled to preserve the tool’s directional planning framing.",
+        trend_series=[
+            DashboardSeriesDescriptor(key="costBurdenedHouseholds", label="Cost-Burdened Households", color="#dc2626", format="number"),
+            DashboardSeriesDescriptor(key="hudEligibleHouseholds", label="HUD-Eligible Households", color="#2563eb", format="number"),
+            DashboardSeriesDescriptor(key="medianHouseholdIncome", label="Median Household Income", color="#7c3aed", format="currency"),
+        ],
+        time_series={
+            "costBurdenedHouseholds": _build_projection_series(burden_history, data_year, float(result.demographics.cost_burdened_renter_households or 0)),
+            "hudEligibleHouseholds": _build_projection_series(hud_history, data_year, float(result.demographics.hud_eligible_households or 0)),
+            "medianHouseholdIncome": _build_projection_series(income_history, data_year, float(result.demographics.median_household_income or 0)),
+        },
+        distribution_title="Household income distribution",
+        distribution_subtitle="Distribution remains tied to the live catchment and selected ZIP layer rather than seeded fallback ZIPs.",
+        distribution=_normalize_distribution(base_distribution, float(result.demographics.total_households or 0), float(result.demographics.total_households or 0) * 1.02),
+        drilldowns=drilldowns,
+        highlight_cards=[
+            DashboardViewCard(label="ZIPs in catchment", value=str(len(zip_codes)), detail="Selected by actual catchment/ZCTA intersection."),
+            DashboardViewCard(label="Cost-burdened households", value=f"{int(sum(row['cost_burdened_renter_households'] for row in current_by_zip.values())):,}", detail="Current catchment-wide housing-need base."),
+            DashboardViewCard(label="Existing units", value=f"{int(sum(row['competitor_units'] for row in current_by_zip.values())):,}", detail="Current affordable-housing / competitor units visible in selected ZIPs."),
+        ],
     )
 
 
-def build_dashboard_response(*, request: AnalysisRequest, result: AnalysisResponse, location: dict[str, Any]) -> DashboardResponse:
-    zip_codes = _extract_zip_codes(result, location)
-    feature_collection, geometry_source = _feature_collection(zip_codes, result.lat, result.lon)
-    weights = _weights(zip_codes, result)
-
-    if result.ministry_type == "elder_care":
-        module_data, metric_maps = _elder_payload(zip_codes, result, weights)
-    elif result.ministry_type == "housing":
-        module_data, metric_maps = _housing_payload(zip_codes, result, weights)
-    else:
-        module_data, metric_maps = _school_payload(zip_codes, result, weights)
-
+def _apply_metric_properties(spatial: DashboardSpatialContext, metric_maps: dict[str, dict[str, float]]) -> dict[str, Any]:
+    feature_collection = json.loads(json.dumps(spatial.feature_collection))
     for feature in feature_collection.get("features", []):
         props = feature.setdefault("properties", {})
-        zip_code = str(props.get("zipCode") or props.get("zip") or "")
-        props["zipCode"] = zip_code
-        props["name"] = props.get("name") or zip_code
+        zip_code = str(props.get("zipCode") or "")
         for metric_key, values in metric_maps.items():
             if zip_code in values:
                 props[metric_key] = values[zip_code]
+    return feature_collection
 
-    freshness = result.data_freshness
-    confidence_band = "medium"
-    if freshness and freshness.sources:
-        statuses = {source.status for source in freshness.sources}
-        if statuses == {"fresh"}:
-            confidence_band = "high"
-        elif "stale" in statuses:
-            confidence_band = "low"
+
+async def build_dashboard_response(*, request: AnalysisRequest, result: AnalysisResponse, location: dict[str, Any]) -> DashboardResponse:
+    spatial = _select_zcta_records(result)
+    current_by_zip, history_by_zip, data_year = await _load_db_aggregates(result, spatial)
+    if not current_by_zip:
+        current_by_zip, history_by_zip, fallback_year = _area_weighted_fallback(result, spatial)
+        data_year = data_year or fallback_year
+
+    if result.ministry_type == "elder_care":
+        module_data = _build_elder_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+    elif result.ministry_type == "housing":
+        module_data = _build_housing_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+    else:
+        module_data = _build_schools_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+
+    feature_collection = _apply_metric_properties(spatial, module_data.metric_maps)
+
+    freshness = result.data_freshness.model_dump() if result.data_freshness else None
+    freshness_statuses = {source.status for source in (result.data_freshness.sources if result.data_freshness else [])}
+    if freshness_statuses == {"fresh"}:
+        confidence_band = "high"
+    elif "stale" in freshness_statuses:
+        confidence_band = "low"
+    else:
+        confidence_band = "medium"
+
+    metadata = DashboardMetadata(
+        data_year=int(data_year or DASHBOARD_DATA_YEAR),
+        projection_years=_projection_years(),
+        last_updated=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        confidence_band=confidence_band,
+        projection_label="Projected values are directional planning estimates with confidence bounds; they are not observed outcomes.",
+        geometry_source=spatial.geometry_source,
+        freshness=freshness,
+    )
+    metadata.freshness = {**(metadata.freshness or {}), "zipSelectionMethod": spatial.selection_method, "zipCount": len(spatial.zip_codes)}
 
     return DashboardResponse(
         catchment=DashboardCatchment(
             center={"lat": result.lat, "lng": result.lon, "address": location.get("matched_address") or request.address},
             drive_time_minutes=request.drive_minutes,
-            zip_codes=zip_codes,
+            zip_codes=spatial.zip_codes,
             geojson=feature_collection,
         ),
         data=module_data,
-        metadata=DashboardMetadata(
-            data_year=DASHBOARD_DATA_YEAR,
-            projection_years=_projection_years(),
-            last_updated=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-            confidence_band=confidence_band,
-            projection_label="Projected values are directional planning estimates, not observed outcomes.",
-            geometry_source=geometry_source,
-            freshness=freshness.model_dump() if freshness else None,
-        ),
+        metadata=metadata,
     )

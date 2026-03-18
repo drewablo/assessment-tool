@@ -117,6 +117,7 @@ async def cmd_ingest_zcta(args):
 async def cmd_ingest_all(args):
     await _ensure_schema()
     await cmd_ingest_census(args)
+    await cmd_ingest_zcta(argparse.Namespace(zip_codes=None))
     await cmd_ingest_schools()
     await cmd_ingest_elder_care()
     await cmd_ingest_housing()

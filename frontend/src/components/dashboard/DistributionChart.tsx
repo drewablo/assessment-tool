@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import {
   Bar,
   BarChart,
@@ -25,7 +25,7 @@ interface Props {
   fileBaseName?: string;
 }
 
-export default function DistributionChart({
+function DistributionChart({
   title,
   subtitle,
   data,
@@ -66,3 +66,5 @@ export default function DistributionChart({
     </div>
   );
 }
+
+export default memo(DistributionChart);
