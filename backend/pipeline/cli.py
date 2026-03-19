@@ -4,6 +4,8 @@ Usage:
     python -m pipeline.cli init-db           # Create tables and PostGIS extension
     python -m pipeline.cli ingest-census     # Ingest ACS 5-Year data
     python -m pipeline.cli ingest-schools    # Ingest NCES PSS data
+    python -m pipeline.cli ingest-census-history # Ingest dashboard ACS history vintages
+    python -m pipeline.cli ingest-nais       # Reconcile NAIS schools into competitor table
     python -m pipeline.cli ingest-elder-care # Ingest CMS provider data
     python -m pipeline.cli ingest-housing    # Ingest all HUD housing steps
     python -m pipeline.cli ingest-hud-property
@@ -65,17 +67,38 @@ async def _ensure_schema():
 async def cmd_ingest_census(args):
     await _ensure_schema()
     from pipeline.ingest_census import _ingest_acs_data_async
+
     states = args.states.split(",") if args.states else None
     print(f"Ingesting Census ACS {args.vintage} data...")
     result = await _ingest_acs_data_async(vintage=args.vintage, states=states)
     print(f"Done: {result}")
 
 
+async def cmd_ingest_census_history(args):
+    await _ensure_schema()
+    from pipeline.ingest_census import ingest_all_historical_vintages
+
+    states = args.states.split(",") if args.states else None
+    print("Ingesting ACS historical dashboard vintages (2013, 2015, 2017, 2019, 2021)...")
+    result = await ingest_all_historical_vintages(states=states)
+    print(f"Done: {result}")
+
+
 async def cmd_ingest_schools():
     await _ensure_schema()
     from pipeline.ingest_schools import _ingest_pss_async
+
     print("Ingesting NCES PSS school data...")
     result = await _ingest_pss_async()
+    print(f"Done: {result}")
+
+
+async def cmd_ingest_nais():
+    await _ensure_schema()
+    from pipeline.ingest_nais import _ingest_nais_async
+
+    print("Reconciling NAIS school data...")
+    result = await _ingest_nais_async()
     print(f"Done: {result}")
 
 
@@ -138,8 +161,10 @@ async def cmd_ingest_zcta(args):
 async def cmd_ingest_all(args):
     await _ensure_schema()
     await cmd_ingest_census(args)
+    await cmd_ingest_census_history(argparse.Namespace(states=args.states))
     await cmd_ingest_zcta(argparse.Namespace(zip_codes=None))
     await cmd_ingest_schools()
+    await cmd_ingest_nais()
     await cmd_ingest_elder_care()
     await cmd_ingest_housing()
     await cmd_ingest_hud_section202()
@@ -224,7 +249,16 @@ async def cmd_status():
         print()
 
         # Latest pipeline runs
-        pipelines = ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]
+        pipelines = [
+            "census_acs",
+            "nces_pss",
+            "nais_schools",
+            "cms_elder_care",
+            "hud_lihtc_property",
+            "hud_lihtc_tenant",
+            "hud_qct_dda",
+            "hud_section_202",
+        ]
         for name in pipelines:
             run = await get_latest_run(session, name)
             if run:
@@ -245,7 +279,11 @@ def main():
     census_parser.add_argument("--vintage", default="2022", help="ACS vintage year")
     census_parser.add_argument("--states", default=None, help="Comma-separated state FIPS codes")
 
+    census_history_parser = sub.add_parser("ingest-census-history", help="Ingest ACS dashboard history vintages")
+    census_history_parser.add_argument("--states", default=None, help="Comma-separated state FIPS codes")
+
     sub.add_parser("ingest-schools", help="Ingest NCES PSS data")
+    sub.add_parser("ingest-nais", help="Reconcile NAIS schools into competitors table")
     sub.add_parser("ingest-elder-care", help="Ingest CMS provider data")
     sub.add_parser("ingest-housing", help="Ingest all HUD housing datasets")
     sub.add_parser("ingest-hud-property", help="Ingest HUD LIHTC property ZIP")
@@ -279,8 +317,12 @@ def main():
         asyncio.run(cmd_init_db())
     elif args.command == "ingest-census":
         asyncio.run(cmd_ingest_census(args))
+    elif args.command == "ingest-census-history":
+        asyncio.run(cmd_ingest_census_history(args))
     elif args.command == "ingest-schools":
         asyncio.run(cmd_ingest_schools())
+    elif args.command == "ingest-nais":
+        asyncio.run(cmd_ingest_nais())
     elif args.command == "ingest-elder-care":
         asyncio.run(cmd_ingest_elder_care())
     elif args.command == "ingest-housing":

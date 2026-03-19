@@ -186,6 +186,46 @@ AUTH_USERS=admin:admin            # comma-separated username:password pairs
 
 ---
 
+## Data ingest pipelines
+
+The revised dashboard/data flow now depends on a few ingest steps beyond the original current-vintage ACS load. In particular:
+
+- `ingest-census-history` backfills the ACS vintages used by dashboard projections (`2013`, `2015`, `2017`, `2019`, `2021`).
+- `ingest-nais` reconciles the NAIS source file against PSS so dashboard and analysis competitor tables include schools that appear in either source without double-counting overlaps.
+- `ingest-zcta` remains required for the choropleth ZIP geometry cache.
+
+### Recommended ingest order
+
+From `backend/` run:
+
+```bash
+python -m pipeline.cli init-db
+python -m pipeline.cli ingest-census --vintage 2022
+python -m pipeline.cli ingest-census-history
+python -m pipeline.cli ingest-zcta
+python -m pipeline.cli ingest-schools
+python -m pipeline.cli ingest-nais
+python -m pipeline.cli ingest-elder-care
+python -m pipeline.cli ingest-housing
+python -m pipeline.cli ingest-hud-section202
+```
+
+### Full refresh shortcut
+
+For a one-command refresh, use:
+
+```bash
+python -m pipeline.cli ingest-all
+```
+
+That now runs, in order, current ACS ingest, historical ACS vintages, ZCTA cache warm-up, PSS ingest, NAIS reconciliation, elder-care ingest, housing ingest, and HUD Section 202 ingest.
+
+### Pipeline notes
+
+- **ACS history:** projections improve materially once `ingest-census-history` has populated `CensusTractHistory` with multiple vintages instead of a single backstop point.
+- **NAIS reconciliation:** `ingest-nais` reads `exsources/nais_schools.csv`, attempts to match NAIS schools to existing PSS records, and geocodes NAIS-only schools through the Census Geocoder. Because those geocoder calls are rate-limited to one request per second, this step can take noticeably longer than the other school ingest.
+- **PSS + NAIS schema:** existing PSS rows default to `data_source="pss"`; NAIS-only rows are inserted as `data_source="nais"`; overlapping PSS rows are flagged with NAIS metadata instead of duplicated.
+
 ## Dashboard ZIP boundary cache warm-up
 
 The dashboard choropleth depends on a cached Census ZCTA boundary bundle. Treat this as a standard deployment prerequisite.

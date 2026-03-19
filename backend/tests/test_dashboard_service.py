@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from shapely.geometry import shape
+from shapely.prepared import prep
 
 import main
 from models.schemas import (
@@ -13,6 +15,7 @@ from models.schemas import (
     AnalysisResponse,
     CompetitorSchool,
     ConfidenceSummary,
+    DemographicTrend,
     DataFreshnessMetadata,
     DataFreshnessSource,
     DemographicData,
@@ -371,3 +374,85 @@ def test_dashboard_endpoint_requires_zcta_cache(tmp_path, monkeypatch):
     body = response.json()
     assert body["detail"]["error_code"] == "ZCTA_CACHE_MISSING"
     assert "ingest-zcta" in body["detail"]["message"]
+
+
+def test_assign_competitors_to_zips_uses_point_in_polygon_when_zip_missing():
+    current_by_zip = {"33901": dashboard_service._init_zip_row(), "33916": dashboard_service._init_zip_row()}
+    prepared = {
+        "33901": prep(shape({"type": "Polygon", "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]]})),
+        "33916": prep(shape({"type": "Polygon", "coordinates": [[[-81.88, 26.63], [-81.78, 26.63], [-81.78, 26.73], [-81.88, 26.73], [-81.88, 26.63]]]})),
+    }
+    competitors = [CompetitorSchool(name="Mapped by geometry", lat=26.65, lon=-81.90, distance_miles=1.0, affiliation="Independent", is_catholic=False, city="Fort Myers", state="FL", zip_code=None, enrollment=120, gender="Co-ed", grade_level="K-12")]
+
+    dashboard_service._assign_competitors_to_zips(competitors, current_by_zip, prepared)
+
+    assert current_by_zip["33901"]["competitor_count"] == 1
+    assert current_by_zip["33901"]["competitor_units"] == 120
+
+
+def test_build_projection_series_projects_non_flat_growth_with_multi_point_history():
+    series = dashboard_service._build_projection_series({2013: 820.0, 2015: 900.0, 2017: 980.0, 2019: 1090.0}, 2022, 1200.0)
+
+    current_point = next(point for point in series if point.year == 2022)
+    projected_2029 = next(point for point in series if point.year == 2029)
+
+    assert current_point.value == 1200.0
+    assert projected_2029.value > current_point.value * 1.01
+
+
+def test_build_housing_payload_includes_population_and_renter_time_series():
+    result = _response("housing")
+    current_by_zip, history_by_zip, data_year = dashboard_service._area_weighted_fallback(
+        result,
+        dashboard_service.DashboardSpatialContext(
+            zip_codes=["33901", "33916"],
+            feature_collection={
+                "type": "FeatureCollection",
+                "features": [
+                    {"type": "Feature", "properties": {"zipCode": "33901"}, "geometry": {"type": "Polygon", "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]]}},
+                    {"type": "Feature", "properties": {"zipCode": "33916"}, "geometry": {"type": "Polygon", "coordinates": [[[-81.88, 26.63], [-81.78, 26.63], [-81.78, 26.73], [-81.88, 26.73], [-81.88, 26.63]]]}},
+                ],
+            },
+            geometry_source="test",
+            selection_method="test",
+            catchment_geometry=None,
+            intersection_weights={"33901": 0.6, "33916": 0.4},
+        ),
+    )
+
+    payload = dashboard_service._build_housing_payload(["33901", "33916"], current_by_zip, history_by_zip, result, data_year)
+
+    assert payload.time_series["totalPopulation"]
+    assert payload.time_series["renterHouseholds"]
+    assert payload.time_series["totalPopulation"][0].year <= data_year
+    assert payload.time_series["renterHouseholds"][0].year <= data_year
+
+
+def test_area_weighted_fallback_uses_demographic_trend_for_history_backcast():
+    result = _response("schools")
+    result.trend = DemographicTrend(school_age_pop_pct=20.0, income_real_pct=10.0, families_pct=15.0)
+    spatial = dashboard_service.DashboardSpatialContext(
+        zip_codes=["33901"],
+        feature_collection={
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "properties": {"zipCode": "33901"}, "geometry": {"type": "Polygon", "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]]}}
+            ],
+        },
+        geometry_source="test",
+        selection_method="test",
+        catchment_geometry=None,
+        intersection_weights={"33901": 1.0},
+    )
+
+    current_by_zip, history_by_zip, data_year = dashboard_service._area_weighted_fallback(result, spatial)
+    series = dashboard_service._build_projection_series(
+        {year: values.get("school_age_population", 0.0) for year, values in history_by_zip["33901"].items()},
+        data_year,
+        current_by_zip["33901"]["school_age_population"],
+    )
+    current_point = next(point for point in series if point.year == data_year)
+    projected_2029 = next(point for point in series if point.year == 2029)
+
+    assert history_by_zip["33901"][2017]["school_age_population"] < current_by_zip["33901"]["school_age_population"]
+    assert projected_2029.value > current_point.value * 1.01

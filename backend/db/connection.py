@@ -67,6 +67,18 @@ async def init_db():
             "ALTER TABLE IF EXISTS census_tracts "
             "ADD COLUMN IF NOT EXISTS cost_burdened_renter_households INTEGER"
         ))
+        await conn.execute(text(
+            "ALTER TABLE IF EXISTS competitors_schools "
+            "ADD COLUMN IF NOT EXISTS data_source VARCHAR(20) DEFAULT 'pss'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE IF EXISTS competitors_schools "
+            "ADD COLUMN IF NOT EXISTS also_in_nais BOOLEAN DEFAULT FALSE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE IF EXISTS competitors_schools "
+            "ADD COLUMN IF NOT EXISTS nais_id VARCHAR(30)"
+        ))
 
 
 async def close_db():

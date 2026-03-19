@@ -233,6 +233,9 @@ def _transform_schools(df: pd.DataFrame) -> list[dict]:
             "typology_code": typology,
             "competitor_tier": tier,
             "tier_weight": weight,
+            "data_source": "pss",
+            "also_in_nais": False,
+            "nais_id": None,
             "pss_vintage": "2021-22",
         })
 
