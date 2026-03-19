@@ -5,19 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import ModuleDashboardView from "@/components/dashboard/modules/ModuleDashboardView";
 import { fetchDashboard } from "@/lib/api";
 import { toDashboardModuleConfig } from "@/lib/dashboard-live";
-import type { AnalysisRequest, AnalysisResponse, DashboardResponse } from "@/lib/types";
-
-const SESSION_KEY = "dashboard_analysis_context";
-
-export interface DashboardSessionContext {
-  request: AnalysisRequest;
-  result: AnalysisResponse;
-}
-
-export function openDashboard(request: AnalysisRequest, result: AnalysisResponse) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify({ request, result }));
-  window.open("/dashboard", "_blank");
-}
+import { loadDashboardContext } from "@/lib/dashboard-session";
+import type { DashboardSessionContext } from "@/lib/dashboard-session";
+import type { DashboardResponse } from "@/lib/types";
 
 export default function DashboardPage() {
   const [context, setContext] = useState<DashboardSessionContext | null>(null);
@@ -26,20 +16,13 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as DashboardSessionContext;
-        if (parsed.request && parsed.result) {
-          setContext(parsed);
-          return;
-        }
-      }
-    } catch {
-      // ignore
+    const restored = loadDashboardContext();
+    if (restored) {
+      setContext(restored);
+    } else {
+      setError("No analysis context found. Run an analysis first, then open the dashboard from the results page.");
+      setLoading(false);
     }
-    setError("No analysis context found. Run an analysis first, then open the dashboard from the results page.");
-    setLoading(false);
   }, []);
 
   useEffect(() => {
