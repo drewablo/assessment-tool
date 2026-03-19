@@ -31,9 +31,8 @@ logging.basicConfig(
 
 
 async def cmd_init_db():
-    from db.connection import init_db
-    print("Initializing database (creating tables + PostGIS extension)...")
-    await init_db()
+    print("Initializing database (creating tables + PostGIS extension)...", flush=True)
+    await _ensure_schema()
     print("Database initialized successfully.")
 
 
