@@ -1,5 +1,5 @@
 import type { FeatureCollection } from "geojson";
-import type { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
+import type { DashboardPreviewModule, DashboardPreviewView } from "@/lib/dashboard-preview-data";
 import type { ParameterBarField } from "@/lib/dashboard";
 import type { DashboardTimeSeriesPoint } from "@/lib/dashboard";
 import type { AnalysisRequest, AnalysisResponse, DashboardResponse } from "@/lib/types";
@@ -27,6 +27,60 @@ function requestFields(request: AnalysisRequest): ParameterBarField[] {
     { label: "Target", value: (request.housing_target_population ?? "all_ages").replaceAll("_", " ") },
     ...shared,
   ];
+}
+
+function sidebarViewsForModule(slug: DashboardPreviewModule["slug"]): Record<string, DashboardPreviewView> | undefined {
+  if (slug === "schools") {
+    return {
+      affordability: {
+        title: "Affordability",
+        description: "Wave 1 schools work starts with tuition fit, aid pressure, and the depth of high-income families across the catchment.",
+        tabs: [
+          { key: "summary", label: "Summary" },
+          { key: "median_income", label: "Median Income" },
+          { key: "high_income", label: "High Income ($200K+)" },
+          { key: "distribution", label: "Distribution" },
+          { key: "change_average", label: "Change in Average" },
+        ],
+        distributionReferenceLine: {
+          value: 1000,
+          label: "Tuition-qualified family target",
+          color: "#f59e0b",
+        },
+      },
+    };
+  }
+
+  if (slug === "elder-care") {
+    return {
+      partnership_viability: {
+        title: "Partnership Viability",
+        description: "Wave 1 elder-care work centers on nearby operators, their ownership profile, and visible quality signals.",
+        tabs: [
+          { key: "service_map", label: "Service Map" },
+          { key: "potential_partners", label: "Potential Partners" },
+        ],
+        tableVariant: "partner",
+      },
+    };
+  }
+
+  if (slug === "housing") {
+    return {
+      community_profile: {
+        title: "Community Profile",
+        description: "Wave 1 folds demographic trends into Community Profile so population, tenure, and burden context stay together.",
+        tabs: [
+          { key: "population_trend", label: "Population Trend" },
+          { key: "renter_owner", label: "Renter vs. Owner" },
+          { key: "age_distribution", label: "Age Distribution" },
+          { key: "poverty_rate", label: "Poverty Rate" },
+        ],
+      },
+    };
+  }
+
+  return undefined;
 }
 
 export function toDashboardModuleConfig(
@@ -94,6 +148,14 @@ export function toDashboardModuleConfig(
       primary: row.primary,
       comparison: row.comparison ?? undefined,
     })),
+    distributionReferenceLine:
+      payload.data.slug === "schools"
+        ? {
+            value: 1000,
+            label: "Tuition-qualified family target",
+            color: "#f59e0b",
+          }
+        : undefined,
     zipDrilldowns: Object.fromEntries(
       Object.entries(payload.data.drilldowns).map(([zipCode, drilldown]) => [
         zipCode,
@@ -119,6 +181,7 @@ export function toDashboardModuleConfig(
       ]),
     ),
     highlightCards: payload.data.highlight_cards,
+    sidebarViews: sidebarViewsForModule(payload.data.slug as DashboardPreviewModule["slug"]),
     competitors: analysisResult?.competitor_schools ?? [],
     competitorCounts: {
       catholicCount: analysisResult?.catholic_school_count ?? 0,
