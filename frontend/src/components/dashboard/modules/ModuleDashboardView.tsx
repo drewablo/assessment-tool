@@ -37,7 +37,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   const wrapperClassName = `${embedded ? "rounded-2xl bg-[#f7f7fc] p-3 sm:p-4" : "min-h-screen bg-[#f7f7fc] px-4 py-6"} text-slate-900`;
 
   const content = (
-    <div className={`mx-auto ${embedded ? "max-w-full" : "max-w-[1440px]"} space-y-4`}>
+    <div className={`mx-auto ${embedded ? "max-w-full" : "max-w-[1600px]"} space-y-5`}>
       {/* --- Compact header: title + parameter chips on one line --- */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
@@ -98,7 +98,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
           />
 
           {/* Map + drilldown side by side */}
-          <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.8fr)]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.6fr)]">
             <ChoroplethMap
               title={`${selectedMetric?.label ?? "Market"} by ZIP Code`}
               subtitle="Click a ZIP to open the drilldown card."
