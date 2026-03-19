@@ -144,11 +144,11 @@ function ChoroplethMap({
 
       <div ref={shellRef} className="space-y-4">
         {isEmpty ? (
-          <div className="flex h-[480px] w-full items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">
+          <div className="flex h-[520px] w-full items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">
             ZIP geometry is not available for this catchment yet. Populate the ZCTA cache and rerun the dashboard to render the choropleth.
           </div>
         ) : (
-          <div ref={mapRef} className="h-[480px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
+          <div ref={mapRef} className="h-[520px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
         )}
         <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-slate-500">
           <div className="flex items-center gap-3">

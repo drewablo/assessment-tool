@@ -97,8 +97,8 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
             fileBaseName={`${config.slug}-trend`}
           />
 
-          {/* Map + drilldown side by side */}
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.6fr)]">
+          {/* Map + drilldown stacked */}
+          <div className="grid gap-6">
             <ChoroplethMap
               title={`${selectedMetric?.label ?? "Market"} by ZIP Code`}
               subtitle="Click a ZIP to open the drilldown card."
