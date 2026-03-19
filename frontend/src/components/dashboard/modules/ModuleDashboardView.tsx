@@ -39,7 +39,10 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   const currentDistributionTitle = activeView?.distributionTitle ?? config.distributionTitle;
   const currentDistributionSubtitle = activeView?.distributionSubtitle ?? config.distributionSubtitle;
   const currentDistributionData = activeView?.distributionData ?? config.distributionData;
+  const currentDistributionPrimaryLabel = activeView?.distributionPrimaryLabel ?? "2024";
+  const currentDistributionComparisonLabel = activeView?.distributionComparisonLabel ?? "2029";
   const currentDistributionReferenceLine = activeView?.distributionReferenceLine ?? config.distributionReferenceLine;
+  const currentCallout = activeView?.callout;
 
   useEffect(() => {
     const nextTab = currentTabs[0]?.key ?? "";
@@ -127,6 +130,19 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
           </div>
 
           {/* Trend chart */}
+          {currentCallout ? (
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
+                currentCallout.tone === "warning"
+                  ? "border-amber-200 bg-amber-50 text-amber-900"
+                  : "border-sky-200 bg-sky-50 text-sky-900"
+              }`}
+            >
+              <p className="font-semibold">{currentCallout.title}</p>
+              <p className="mt-1">{currentCallout.body}</p>
+            </div>
+          ) : null}
+
           <TrendChart
             title={currentTrendTitle}
             subtitle={currentTrendSubtitle}
@@ -172,8 +188,8 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
             title={currentDistributionTitle}
             subtitle={currentDistributionSubtitle}
             data={currentDistributionData}
-            primaryLabel="2024"
-            comparisonLabel="2029"
+            primaryLabel={currentDistributionPrimaryLabel}
+            comparisonLabel={currentDistributionComparisonLabel}
             primaryColor="#6366f1"
             comparisonColor="#16a34a"
             referenceLine={currentDistributionReferenceLine}

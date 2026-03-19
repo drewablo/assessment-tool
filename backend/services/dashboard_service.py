@@ -685,6 +685,7 @@ def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
         sidebar_items=[
             DashboardSidebarItem(key="market_overview", title="Market Overview", description="Population, income, and addressable-market context.", badge="Core"),
             DashboardSidebarItem(key="affordability", title="Affordability", description="Median income, high-income-family depth, and tuition-fit context."),
+            DashboardSidebarItem(key="student_body", title="Student Body", description="School-age cohort trend, Catholic-affiliation context, and future comparison hooks."),
             DashboardSidebarItem(key="competitors", title="Competitors", description="Nearby competitor counts and enrollment pressure by ZIP."),
         ],
         tabs=[
@@ -871,6 +872,7 @@ def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
         sidebar_items=[
             DashboardSidebarItem(key="community_profile", title="Community Profile", description="Population, tenure, poverty, and housing-need trend context.", badge="Core"),
             DashboardSidebarItem(key="need_assessment", title="Need Assessment", description="Burdened and HUD-eligible households by ZIP."),
+            DashboardSidebarItem(key="existing_resources", title="Existing Resources", description="Subsidized inventory, supply-gap context, and QCT/DDA summary framing."),
         ],
         tabs=[
             DashboardTabItem(key="summary", label="Summary"),

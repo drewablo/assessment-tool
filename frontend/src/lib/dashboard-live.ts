@@ -29,7 +29,13 @@ function requestFields(request: AnalysisRequest): ParameterBarField[] {
   ];
 }
 
-function sidebarViewsForModule(slug: DashboardPreviewModule["slug"]): Record<string, DashboardPreviewView> | undefined {
+function sidebarViewsForModule(
+  slug: DashboardPreviewModule["slug"],
+  analysisResult?: AnalysisResponse | null,
+): Record<string, DashboardPreviewView> | undefined {
+  const demographics = analysisResult?.demographics;
+  const competitors = analysisResult?.competitor_schools ?? [];
+
   if (slug === "schools") {
     return {
       affordability: {
@@ -48,6 +54,60 @@ function sidebarViewsForModule(slug: DashboardPreviewModule["slug"]): Record<str
           color: "#f59e0b",
         },
       },
+      student_body: {
+        title: "Student Body",
+        description: "Wave 2 begins with school-age population trend and Catholic-affiliation context while a richer comparison view waits on client enrollment inputs.",
+        tabs: [
+          { key: "age_cohorts", label: "Age Cohorts" },
+          { key: "population_trend", label: "Population Trend" },
+          { key: "catchment_enrollment", label: "Catchment vs. Enrollment" },
+          { key: "catholic_affiliation", label: "Catholic Affiliation" },
+        ],
+        callout: {
+          tone: "warning",
+          title: "Catchment comparison is blocked for now",
+          body: "The Wave 2 `CatchmentComparisonView` still needs design review and client enrollment-by-grade inputs, so this release surfaces the available population-trend and Catholic-affiliation context first.",
+        },
+        trendTitle: "School-Age Population Trend",
+        trendSubtitle: "This Wave 2 slice reuses the live school-age and family trend series while cohort-band payload work remains outstanding.",
+        trendSeries: [
+          { key: "schoolAgePopulation", label: "School-Age Population", color: "#7c3aed" },
+          { key: "familiesWithChildren", label: "Families with Children", color: "#2563eb" },
+        ],
+        distributionTitle: "Student Body Context",
+        distributionSubtitle: "Until grade-band cohort payloads are added, this view summarizes the available school-age and Catholic-affiliation counts instead.",
+        distributionPrimaryLabel: "Current",
+        distributionComparisonLabel: "Projected",
+        distributionData: [
+          {
+            bucket: "School-age pop.",
+            primary: demographics?.school_age_population ?? 0,
+            comparison: Math.round((demographics?.school_age_population ?? 0) * 1.05),
+          },
+          {
+            bucket: "Est. Catholic",
+            primary: demographics?.estimated_catholic_school_age ?? 0,
+            comparison: Math.round((demographics?.estimated_catholic_school_age ?? 0) * 1.05),
+          },
+        ],
+        highlightCards: [
+          {
+            label: "School-age pop.",
+            value: `${Math.round(demographics?.school_age_population ?? 0).toLocaleString()}`,
+            detail: "Current school-age population across the catchment.",
+          },
+          {
+            label: "Est. Catholic school-age",
+            value: `${Math.round(demographics?.estimated_catholic_school_age ?? 0).toLocaleString()}`,
+            detail: "Directional estimate using the current Catholic-affiliation methodology.",
+          },
+          {
+            label: "Catholic share",
+            value: demographics?.estimated_catholic_pct != null ? `${demographics.estimated_catholic_pct.toFixed(1)}%` : "N/A",
+            detail: "State-level contextual share applied to school-age population.",
+          },
+        ],
+      },
     };
   }
 
@@ -62,10 +122,65 @@ function sidebarViewsForModule(slug: DashboardPreviewModule["slug"]): Record<str
         ],
         tableVariant: "partner",
       },
+      projections: {
+        title: "Projections",
+        description: "Wave 2 strengthens elder-care projections with a cohort-breakdown lens and care-planning takeaways.",
+        tabs: [
+          { key: "cohort_breakdown", label: "Cohort Breakdown" },
+          { key: "care_implications", label: "Care Implications" },
+        ],
+        callout: {
+          tone: "info",
+          title: "Cohort detail is partially available",
+          body: "Current live data supports 65+ and 75+ trend views today; a fuller 75–84 / 85+ breakout remains tied to richer age-cohort payload work.",
+        },
+        trendTitle: "Aging Pipeline Outlook",
+        trendSubtitle: "Current live projections show the total senior base and the older 75+ cohort so care planning can start before deeper cohort enrichment lands.",
+        trendSeries: [
+          { key: "seniors65Plus", label: "Seniors 65+", color: "#2563eb" },
+          { key: "seniors75Plus", label: "Seniors 75+", color: "#16a34a" },
+        ],
+        distributionTitle: "Current vs. 10-Year Senior Cohorts",
+        distributionSubtitle: "The available cohort split shows how much of the senior base is already concentrated in higher-acuity age bands.",
+        distributionPrimaryLabel: "Current",
+        distributionComparisonLabel: "10-Year",
+        distributionData: [
+          {
+            bucket: "65-74",
+            primary: Math.max((demographics?.seniors_65_plus ?? 0) - (demographics?.seniors_75_plus ?? 0), 0),
+            comparison: Math.max((demographics?.seniors_projected_10yr ?? demographics?.seniors_65_plus ?? 0) - (demographics?.seniors_projected_5yr ?? demographics?.seniors_75_plus ?? 0), 0),
+          },
+          {
+            bucket: "75+",
+            primary: demographics?.seniors_75_plus ?? 0,
+            comparison: demographics?.seniors_projected_5yr ?? demographics?.seniors_75_plus ?? 0,
+          },
+        ],
+        highlightCards: [
+          {
+            label: "5-year seniors",
+            value: `${Math.round(demographics?.seniors_projected_5yr ?? 0).toLocaleString()}`,
+            detail: "Projected 5-year catchment total in the current elder-care model.",
+          },
+          {
+            label: "10-year seniors",
+            value: `${Math.round(demographics?.seniors_projected_10yr ?? 0).toLocaleString()}`,
+            detail: "Projected 10-year catchment total for long-range care planning.",
+          },
+          {
+            label: "Living alone",
+            value: `${Math.round(demographics?.seniors_living_alone ?? 0).toLocaleString()}`,
+            detail: "Directional proxy for care-navigation and support-intensity demand.",
+          },
+        ],
+      },
     };
   }
 
   if (slug === "housing") {
+    const totalUnits = competitors.reduce((sum, project) => sum + (project.total_units ?? project.enrollment ?? 0), 0);
+    const supplyGap = Math.max((demographics?.hud_eligible_households ?? 0) - totalUnits, 0);
+
     return {
       community_profile: {
         title: "Community Profile",
@@ -75,6 +190,49 @@ function sidebarViewsForModule(slug: DashboardPreviewModule["slug"]): Record<str
           { key: "renter_owner", label: "Renter vs. Owner" },
           { key: "age_distribution", label: "Age Distribution" },
           { key: "poverty_rate", label: "Poverty Rate" },
+        ],
+      },
+      existing_resources: {
+        title: "Existing Resources",
+        description: "Wave 2 starts surfacing nearby subsidized inventory, approximate supply gap, and QCT/DDA context while the boundary overlay remains in design review.",
+        tabs: [
+          { key: "subsidized_map", label: "Subsidized Housing Map" },
+          { key: "project_table", label: "Project Table" },
+          { key: "supply_gap", label: "Supply Gap" },
+          { key: "pipeline", label: "Pipeline" },
+        ],
+        callout: {
+          tone: "warning",
+          title: "Boundary overlay remains blocked",
+          body: "The dedicated `BoundaryOverlayLayer` still needs design review before QCT/DDA polygons can be rendered on top of the ZIP choropleth, so this release focuses on table + summary context first.",
+        },
+        metricOptions: [
+          { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
+          { key: "costBurdenedHouseholds", label: "Cost-Burdened Households" },
+          { key: "renterHouseholds", label: "Renter Households" },
+        ],
+        trendTitle: "Existing Subsidized Supply vs. Need",
+        trendSubtitle: "The current Wave 2 slice contrasts visible affordability pressure with eligible-household depth while overlay and pipeline work remain pending.",
+        trendSeries: [
+          { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+          { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+        ],
+        highlightCards: [
+          {
+            label: "Approx. supply gap",
+            value: `${Math.round(supplyGap).toLocaleString()} HH`,
+            detail: "HUD-eligible households minus currently visible subsidized units in the competitive set.",
+          },
+          {
+            label: "QCT projects",
+            value: `${Math.round(demographics?.qct_designated_projects ?? 0)}`,
+            detail: "Projects currently flagged as QCT-designated in the available enrichment.",
+          },
+          {
+            label: "DDA projects",
+            value: `${Math.round(demographics?.dda_designated_projects ?? 0)}`,
+            detail: "Projects currently flagged as DDA-designated in the available enrichment.",
+          },
         ],
       },
     };
@@ -181,7 +339,7 @@ export function toDashboardModuleConfig(
       ]),
     ),
     highlightCards: payload.data.highlight_cards,
-    sidebarViews: sidebarViewsForModule(payload.data.slug as DashboardPreviewModule["slug"]),
+    sidebarViews: sidebarViewsForModule(payload.data.slug as DashboardPreviewModule["slug"], analysisResult),
     competitors: analysisResult?.competitor_schools ?? [],
     competitorCounts: {
       catholicCount: analysisResult?.catholic_school_count ?? 0,

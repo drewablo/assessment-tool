@@ -80,3 +80,17 @@
 - Added a dedicated `PartnerFacilityTable` and surfaced it for the elder-care partnership-viability sidebar while keeping the shared competitor table for existing landscape views.
 - Updated preview/live dashboard metadata so schools affordability, elder-care partnership viability, and housing community-profile demographic trends have Wave 1-specific labels, tabs, and highlight cards.
 - Verified the frontend changes with the existing frontend tests plus a full TypeScript no-emit check; `next lint` could not run non-interactively because the repo does not yet have an ESLint config.
+
+## Plan — Wave 2 deferred dashboard domains
+- [x] Re-read `DEFERRED_DASHBOARD_DOMAINS.md`, review the prior Wave 1 implementation, and map the smallest credible Wave 2 slice that avoids blocked component work.
+- [x] Extend shared dashboard view metadata/rendering for Wave 2 callouts and timeframe labeling where needed.
+- [x] Add Wave 2 sidebar views for schools student body, elder-care projections, and housing existing resources, explicitly marking `CatchmentComparisonView` / `BoundaryOverlayLayer` blockers where applicable.
+- [x] Update live/backend dashboard metadata to surface the new Wave 2 framing without inventing unavailable data.
+- [x] Run targeted verification, then update review notes.
+
+## Review notes — Wave 2 deferred dashboard domains
+- Added shared Wave 2 view metadata for callouts and custom distribution timeframe labels so blocked component work can be called out directly inside the dashboard shell.
+- Added Wave 2 sidebar framing for schools `Student Body`, elder-care `Projections`, and housing `Existing Resources`, using only the unblocked slices supported by current data and explicitly labeling `CatchmentComparisonView` / `BoundaryOverlayLayer` blockers.
+- Updated live config generation and backend sidebar metadata so the new Wave 2 sidebars appear in live dashboards without inventing unavailable data contracts.
+- Verified the frontend changes with the existing frontend tests and a TypeScript no-emit check; a targeted backend dashboard-service test currently fails in this repo because `services.dashboard_service` no longer exports `_load_zcta_cache`, which appears to predate this patch.
+
