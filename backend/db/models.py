@@ -164,6 +164,9 @@ class CompetitorSchoolRecord(Base):
 
     competitor_tier: Mapped[str] = mapped_column(String(20), default="moderate")
     tier_weight: Mapped[float] = mapped_column(Float, default=0.4)
+    data_source: Mapped[str] = mapped_column(String(20), default="pss")
+    also_in_nais: Mapped[bool] = mapped_column(Boolean, default=False)
+    nais_id: Mapped[str | None] = mapped_column(String(30))
 
     pss_vintage: Mapped[str] = mapped_column(String(10), default="2021-22")
     ingested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

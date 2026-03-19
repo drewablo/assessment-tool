@@ -4,6 +4,14 @@ import type { ParameterBarField } from "@/lib/dashboard";
 import type { DashboardTimeSeriesPoint } from "@/lib/dashboard";
 import type { AnalysisRequest, AnalysisResponse, DashboardResponse } from "@/lib/types";
 
+export function dashboardCompetitors(analysisResult?: AnalysisResponse | null) {
+  return analysisResult?.competitor_schools ?? analysisResult?.housing_projects ?? [];
+}
+
+export function shouldShowCompetitorTable(activeSidebar: string, tableVariant: string | undefined, competitorCount: number) {
+  return tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources", "enrollment"].includes(activeSidebar) && competitorCount > 0;
+}
+
 function requestFields(request: AnalysisRequest): ParameterBarField[] {
   const shared: ParameterBarField[] = [{ label: "Market", value: request.market_context }];
 
@@ -34,7 +42,7 @@ function sidebarViewsForModule(
   analysisResult?: AnalysisResponse | null,
 ): Record<string, DashboardPreviewView> | undefined {
   const demographics = analysisResult?.demographics;
-  const competitors = analysisResult?.competitor_schools ?? [];
+  const competitors = dashboardCompetitors(analysisResult);
 
   if (slug === "schools") {
     return {
@@ -437,12 +445,12 @@ export function toDashboardModuleConfig(
     ),
     highlightCards: payload.data.highlight_cards,
     sidebarViews: sidebarViewsForModule(payload.data.slug as DashboardPreviewModule["slug"], analysisResult),
-    competitors: analysisResult?.competitor_schools ?? [],
+    competitors: dashboardCompetitors(analysisResult),
     competitorCounts: {
       catholicCount: analysisResult?.catholic_school_count ?? 0,
       totalPrivateCount:
         analysisResult?.total_private_school_count ??
-        analysisResult?.competitor_schools.length ??
+        dashboardCompetitors(analysisResult).length ??
         0,
       radiusMiles: analysisResult?.radius_miles ?? 0,
     },
