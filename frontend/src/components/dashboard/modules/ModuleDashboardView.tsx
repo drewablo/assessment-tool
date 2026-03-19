@@ -18,9 +18,11 @@ import { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
 interface Props {
   config: DashboardPreviewModule;
   embedded?: boolean;
+  backHref?: string;
+  backLabel?: string;
 }
 
-export default function ModuleDashboardView({ config, embedded = false }: Props) {
+export default function ModuleDashboardView({ config, embedded = false, backHref, backLabel }: Props) {
   const [activeSidebar, setActiveSidebar] = useState(config.sidebarItems[0]?.key ?? "");
   const [activeTab, setActiveTab] = useState(config.tabs[0]?.key ?? "");
   const [metricKey, setMetricKey] = useState(config.metricOptions[0]?.key ?? "");
@@ -84,14 +86,14 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">{config.title}</h1>
           {!embedded && (
-            <Link href="/dashboard-preview" className="text-xs font-medium text-indigo-600 hover:text-indigo-800">
-              ← Gallery
+            <Link href={backHref ?? "/dashboard-preview"} className="text-xs font-medium text-indigo-600 hover:text-indigo-800">
+              ← {backLabel ?? "Gallery"}
             </Link>
           )}
         </div>
         <ParameterBar
           driveTimeMinutes={config.driveTimeMinutes}
-          address={config.address ?? "15680 Pine Ridge Road, Fort Myers, FL"}
+          address={config.address ?? ""}
           primaryLabel={config.primaryLabel}
           primaryValue={config.primaryValue}
           secondaryLabel={config.secondaryLabel}
@@ -170,6 +172,11 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
                 }
               }}
               fileBaseName={`${config.slug}-choropleth`}
+              competitors={config.competitors}
+              ministryType={config.slug === "elder-care" ? "elder_care" : config.slug}
+              centerLabel={config.address}
+              centerLat={config.centerLat}
+              centerLon={config.centerLon}
             />
 
             {zipData ? (

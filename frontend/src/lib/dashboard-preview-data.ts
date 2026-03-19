@@ -67,6 +67,8 @@ export interface DashboardPreviewModule {
   highlightCards: Array<{ label: string; value: string; detail: string }>;
   sidebarViews?: Record<string, DashboardPreviewView>;
   address?: string;
+  centerLat?: number;
+  centerLon?: number;
   parameterFields?: ParameterBarField[];
   competitors?: CompetitorSchool[];
   competitorCounts?: {

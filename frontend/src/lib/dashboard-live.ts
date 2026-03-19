@@ -68,6 +68,11 @@ function sidebarViewsForModule(
           title: "Catchment comparison is blocked for now",
           body: "The Wave 2 `CatchmentComparisonView` still needs design review and client enrollment-by-grade inputs, so this release surfaces the available population-trend and Catholic-affiliation context first.",
         },
+        metricOptions: [
+          { key: "schoolAgePopulation", label: "School-Age Population" },
+          { key: "familiesWithChildren", label: "Families with Children" },
+          { key: "medianFamilyIncome", label: "Median Family Income", format: "currency" as const },
+        ],
         trendTitle: "School-Age Population Trend",
         trendSubtitle: "This Wave 2 slice reuses the live school-age and family trend series while cohort-band payload work remains outstanding.",
         trendSeries: [
@@ -250,6 +255,35 @@ function sidebarViewsForModule(
           { key: "age_distribution", label: "Age Distribution" },
           { key: "poverty_rate", label: "Poverty Rate" },
         ],
+        metricOptions: [
+          { key: "totalPopulation", label: "Total Population" },
+          { key: "renterHouseholds", label: "Renter Households" },
+          { key: "costBurdenRate", label: "Cost-Burden Rate", format: "percent" as const },
+          { key: "medianHouseholdIncome", label: "Median Household Income", format: "currency" as const },
+        ],
+        trendTitle: "Population & Household Trends",
+        trendSubtitle: "Total population and renter household counts provide the demographic baseline for housing demand assessment.",
+        trendSeries: [
+          { key: "totalPopulation", label: "Total Population", color: "#6366f1" },
+          { key: "renterHouseholds", label: "Renter Households", color: "#16a34a" },
+        ],
+        highlightCards: [
+          {
+            label: "Total population",
+            value: `${Math.round(demographics?.total_population ?? 0).toLocaleString()}`,
+            detail: "Current total population within the analysis catchment.",
+          },
+          {
+            label: "Total households",
+            value: `${Math.round(demographics?.total_households ?? 0).toLocaleString()}`,
+            detail: "Total households in the catchment.",
+          },
+          {
+            label: "HUD-eligible households",
+            value: `${Math.round(demographics?.hud_eligible_households ?? 0).toLocaleString()}`,
+            detail: "Estimated households below 60% of area median income.",
+          },
+        ],
       },
       existing_resources: {
         title: "Existing Resources",
@@ -338,6 +372,8 @@ export function toDashboardModuleConfig(
     title: payload.data.title,
     description: `${payload.data.description} ${payload.metadata.projection_label ?? ""}`.trim(),
     address: payload.catchment.center.address,
+    centerLat: payload.catchment.center.lat,
+    centerLon: payload.catchment.center.lng,
     primaryLabel: payload.data.primary_label,
     primaryValue: payload.data.primary_value,
     secondaryLabel: payload.data.secondary_label,

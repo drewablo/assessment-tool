@@ -22,6 +22,15 @@ const WhatIfSimulator = dynamic(() => import("./WhatIfSimulator"), { ssr: false 
 const Stage2Dashboard = dynamic(() => import("./Stage2Dashboard"), { ssr: false });
 const LiveModuleDashboard = dynamic(() => import("./dashboard/modules/LiveModuleDashboard"), { ssr: false });
 
+function openFullDashboard(request: AnalysisRequest, result: AnalysisResponse) {
+  try {
+    sessionStorage.setItem("dashboard_analysis_context", JSON.stringify({ request, result }));
+    window.open("/dashboard", "_blank");
+  } catch {
+    // storage full or blocked — fall through silently
+  }
+}
+
 const weightingProfileLabels: Record<string, string> = {
   standard_baseline: "Standard baseline",
   affordability_sensitive: "Affordability-sensitive",
@@ -353,7 +362,18 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
       </div>
 
       {primaryView === "market_dashboard" ? (
-        <LiveModuleDashboard request={request} result={result} />
+        <>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => openFullDashboard(request, result)}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700 shadow-sm transition hover:bg-indigo-50"
+            >
+              Open full dashboard ↗
+            </button>
+          </div>
+          <LiveModuleDashboard request={request} result={result} />
+        </>
       ) : (
         <>
           {/* Overall score + recommendation */}
