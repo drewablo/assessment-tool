@@ -38,7 +38,28 @@ async def cmd_init_db():
 async def _ensure_schema():
     """Run init_db() so any pending ADD COLUMN migrations are applied."""
     from db.connection import init_db
-    await init_db()
+    try:
+        await init_db()
+    except (ConnectionRefusedError, OSError) as exc:
+        print(
+            f"ERROR: Could not connect to the database.\n"
+            f"  Detail: {exc}\n"
+            f"  Is PostgreSQL running? Check with: pg_isready -h localhost -p 5432\n"
+            f"  You can override the connection string with the DATABASE_URL env var.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception as exc:
+        # Catch driver-level wrappers (e.g. asyncpg.CannotConnectNowError)
+        if "connect" in type(exc).__name__.lower() or "connect" in str(exc).lower():
+            print(
+                f"ERROR: Database connection failed ({type(exc).__name__}: {exc}).\n"
+                f"  Is PostgreSQL running? Check with: pg_isready -h localhost -p 5432\n"
+                f"  You can override the connection string with the DATABASE_URL env var.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        raise
 
 
 async def cmd_ingest_census(args):
