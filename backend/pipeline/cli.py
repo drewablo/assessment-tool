@@ -67,38 +67,40 @@ async def _ensure_schema():
 async def cmd_ingest_census(args):
     await _ensure_schema()
     from pipeline.ingest_census import _ingest_acs_data_async
+
     states = args.states.split(",") if args.states else None
     print(f"Ingesting Census ACS {args.vintage} data...")
     result = await _ingest_acs_data_async(vintage=args.vintage, states=states)
     print(f"Done: {result}")
 
 
-
-
 async def cmd_ingest_census_history(args):
     await _ensure_schema()
     from pipeline.ingest_census import ingest_all_historical_vintages
+
     states = args.states.split(",") if args.states else None
     print("Ingesting ACS historical dashboard vintages (2013, 2015, 2017, 2019, 2021)...")
     result = await ingest_all_historical_vintages(states=states)
     print(f"Done: {result}")
 
+
 async def cmd_ingest_schools():
     await _ensure_schema()
     from pipeline.ingest_schools import _ingest_pss_async
+
     print("Ingesting NCES PSS school data...")
     result = await _ingest_pss_async()
     print(f"Done: {result}")
 
 
-
-
 async def cmd_ingest_nais():
     await _ensure_schema()
     from pipeline.ingest_nais import _ingest_nais_async
+
     print("Reconciling NAIS school data...")
     result = await _ingest_nais_async()
     print(f"Done: {result}")
+
 
 async def cmd_ingest_elder_care():
     await _ensure_schema()
@@ -159,8 +161,10 @@ async def cmd_ingest_zcta(args):
 async def cmd_ingest_all(args):
     await _ensure_schema()
     await cmd_ingest_census(args)
+    await cmd_ingest_census_history(argparse.Namespace(states=args.states))
     await cmd_ingest_zcta(argparse.Namespace(zip_codes=None))
     await cmd_ingest_schools()
+    await cmd_ingest_nais()
     await cmd_ingest_elder_care()
     await cmd_ingest_housing()
     await cmd_ingest_hud_section202()
@@ -245,7 +249,16 @@ async def cmd_status():
         print()
 
         # Latest pipeline runs
-        pipelines = ["census_acs", "nces_pss", "cms_elder_care", "hud_lihtc_property", "hud_lihtc_tenant", "hud_qct_dda", "hud_section_202"]
+        pipelines = [
+            "census_acs",
+            "nces_pss",
+            "nais_schools",
+            "cms_elder_care",
+            "hud_lihtc_property",
+            "hud_lihtc_tenant",
+            "hud_qct_dda",
+            "hud_section_202",
+        ]
         for name in pipelines:
             run = await get_latest_run(session, name)
             if run:
