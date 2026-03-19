@@ -72,7 +72,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   );
 
   const zipData = selectedZip ? currentZipDrilldowns[selectedZip] : undefined;
-  const showCompetitorTable = activeView?.tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
+  const showCompetitorTable = activeView?.tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources", "enrollment"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
   const showPartnerTable = activeView?.tableVariant === "partner" && (config.competitors?.length ?? 0) > 0;
 
   const wrapperClassName = `${embedded ? "rounded-2xl bg-[#f7f7fc] p-3 sm:p-4" : "min-h-screen bg-[#f7f7fc] px-4 py-6"} text-slate-900`;

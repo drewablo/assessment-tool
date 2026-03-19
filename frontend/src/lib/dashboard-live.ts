@@ -108,6 +108,65 @@ function sidebarViewsForModule(
           },
         ],
       },
+      enrollment: {
+        title: "Enrollment",
+        description: "Wave 3 begins with market-size and competitor-overlap framing while the interactive scenario modeler remains blocked on design review.",
+        tabs: [
+          { key: "market_size", label: "Market Size" },
+          { key: "competitor_overlap", label: "Competitor Overlap" },
+          { key: "enrollment_scenarios", label: "Enrollment Scenarios" },
+        ],
+        callout: {
+          tone: "warning",
+          title: "Scenario modeler is not implemented yet",
+          body: "The Wave 3 `ScenarioModeler` still requires design review, so this release exposes the available market-depth and competitor-overlap context first.",
+        },
+        metricOptions: [
+          { key: "familiesWithChildren", label: "Families with Children" },
+          { key: "schoolAgePopulation", label: "School-Age Population" },
+          { key: "competitorCount", label: "Nearby Competitors" },
+        ],
+        trendTitle: "Addressable Market vs. Reference Enrollment",
+        trendSubtitle: "Use current addressable-market depth and nearby competitor counts to judge how aggressive the initial enrollment target should be.",
+        distributionTitle: "Enrollment Planning Context",
+        distributionSubtitle: "This first Wave 3 view summarizes the addressable market and benchmark enrollment size while scenario modeling remains blocked.",
+        distributionPrimaryLabel: "Current",
+        distributionComparisonLabel: "Directional target",
+        distributionData: [
+          {
+            bucket: "Addressable market",
+            primary: demographics?.total_addressable_market ?? 0,
+            comparison: Math.round((demographics?.total_addressable_market ?? 0) * 1.1),
+          },
+          {
+            bucket: "Reference enrollment",
+            primary: demographics?.reference_enrollment ?? 0,
+            comparison: demographics?.reference_enrollment ?? 0,
+          },
+          {
+            bucket: "Nearby competitors",
+            primary: competitors.length,
+            comparison: competitors.length,
+          },
+        ],
+        highlightCards: [
+          {
+            label: "Market depth",
+            value: demographics?.market_depth_ratio != null ? `${demographics.market_depth_ratio.toFixed(1)}×` : "N/A",
+            detail: "Addressable families relative to the current reference enrollment benchmark.",
+          },
+          {
+            label: "Addressable market",
+            value: `${Math.round(demographics?.total_addressable_market ?? 0).toLocaleString()}`,
+            detail: "Propensity-weighted families currently estimated to be reachable.",
+          },
+          {
+            label: "Reference size",
+            value: `${Math.round(demographics?.reference_enrollment ?? 0).toLocaleString()}`,
+            detail: "Benchmark enrollment size used in the market-depth calculation.",
+          },
+        ],
+      },
     };
   }
 

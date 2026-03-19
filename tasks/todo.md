@@ -94,3 +94,15 @@
 - Updated live config generation and backend sidebar metadata so the new Wave 2 sidebars appear in live dashboards without inventing unavailable data contracts.
 - Verified the frontend changes with the existing frontend tests and a TypeScript no-emit check; a targeted backend dashboard-service test currently fails in this repo because `services.dashboard_service` no longer exports `_load_zcta_cache`, which appears to predate this patch.
 
+## Plan — Wave 3 deferred dashboard domains + data readiness
+- [x] Re-read `DEFERRED_DASHBOARD_DOMAINS.md`, review the current wave implementation, and scope the smallest honest Wave 3 slice that does not fake blocked components.
+- [x] Add the first Wave 3 schools enrollment dashboard slice using existing dashboard primitives while explicitly blocking the `ScenarioModeler`.
+- [x] Document and triage the early-start data tasks for HUD QCT/DDA, ACS B19037, CMS ownership/operator enrichment, and ACS B25003 verification.
+- [x] Run targeted verification, then update review notes.
+
+## Review notes — Wave 3 deferred dashboard domains + data readiness
+- Added the first Wave 3 schools `Enrollment` sidebar slice in preview/live configs, using current market-depth/addressable-market context and an explicit `ScenarioModeler` blocker callout instead of pretending that component already exists.
+- Updated the shared dashboard renderer so the enrollment sidebar can reuse the existing competitor table alongside the new view-specific callout and planning summaries.
+- Added `backend/docs/deferred_dashboard_data_readiness.md` to track the requested HUD QCT/DDA, ACS B19037, CMS ownership/operator, and ACS B25003 readiness tasks with current status and next actions.
+- Verified the Wave 3 starter with the frontend test suite and a TypeScript no-emit check.
+

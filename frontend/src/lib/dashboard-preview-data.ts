@@ -111,6 +111,12 @@ const schoolsStudentBodyTabs: DashboardTabItem[] = [
   { key: "catholic_affiliation", label: "Catholic Affiliation" },
 ];
 
+const schoolsEnrollmentTabs: DashboardTabItem[] = [
+  { key: "market_size", label: "Market Size" },
+  { key: "competitor_overlap", label: "Competitor Overlap" },
+  { key: "enrollment_scenarios", label: "Enrollment Scenarios" },
+];
+
 const elderProjectionTabs: DashboardTabItem[] = [
   { key: "cohort_breakdown", label: "Cohort Breakdown" },
   { key: "care_implications", label: "Care Implications" },
@@ -153,17 +159,17 @@ const schoolsConfig: DashboardPreviewModule = {
     features: [
       {
         type: "Feature",
-        properties: { zipCode: "33971", name: "33971 Lehigh Acres", schoolAgePopulation: 9200, familiesWithChildren: 4867, medianFamilyIncome: 66098 },
+        properties: { zipCode: "33971", name: "33971 Lehigh Acres", schoolAgePopulation: 9200, familiesWithChildren: 4867, medianFamilyIncome: 66098, competitorCount: 6 },
         geometry: { type: "Polygon", coordinates: [[[-81.93, 26.59], [-81.86, 26.59], [-81.86, 26.66], [-81.93, 26.66], [-81.93, 26.59]]] },
       },
       {
         type: "Feature",
-        properties: { zipCode: "33913", name: "33913 Fort Myers", schoolAgePopulation: 7400, familiesWithChildren: 3924, medianFamilyIncome: 91144 },
+        properties: { zipCode: "33913", name: "33913 Fort Myers", schoolAgePopulation: 7400, familiesWithChildren: 3924, medianFamilyIncome: 91144, competitorCount: 4 },
         geometry: { type: "Polygon", coordinates: [[[-81.86, 26.57], [-81.77, 26.57], [-81.77, 26.66], [-81.86, 26.66], [-81.86, 26.57]]] },
       },
       {
         type: "Feature",
-        properties: { zipCode: "33967", name: "33967 Fort Myers", schoolAgePopulation: 5600, familiesWithChildren: 2718, medianFamilyIncome: 80774 },
+        properties: { zipCode: "33967", name: "33967 Fort Myers", schoolAgePopulation: 5600, familiesWithChildren: 2718, medianFamilyIncome: 80774, competitorCount: 3 },
         geometry: { type: "Polygon", coordinates: [[[-81.88, 26.50], [-81.79, 26.50], [-81.79, 26.57], [-81.88, 26.57], [-81.88, 26.50]]] },
       },
     ],
@@ -326,6 +332,54 @@ const schoolsConfig: DashboardPreviewModule = {
         { label: "School-age pop.", value: "21,780", detail: "Current total across K–12 relevant ages in the catchment." },
         { label: "Catholic estimate", value: "2,615", detail: "Directional estimate of Catholic-affiliated school-age population." },
         { label: "Population trend", value: "Growing", detail: "School-age demand remains positive through the current forecast horizon." },
+      ],
+    },
+    enrollment: {
+      title: "Enrollment",
+      description: "Wave 3 starts with market-size and competitor-overlap context while the dashboard-native `ScenarioModeler` remains blocked on design review.",
+      tabs: schoolsEnrollmentTabs,
+      callout: {
+        tone: "warning",
+        title: "Scenario modeler is blocked pending design review",
+        body: "This Wave 3 slice surfaces the market-size and competitor context that is already supported today; interactive enrollment scenarios still depend on the new `ScenarioModeler` shared component.",
+      },
+      metricOptions: [
+        { key: "familiesWithChildren", label: "Addressable Families" },
+        { key: "schoolAgePopulation", label: "School-Age Population" },
+        { key: "competitorCount", label: "Nearby Competitors" },
+      ],
+      trendTitle: "Addressable Market vs. Existing Seats",
+      trendSubtitle: "The first enrollment view compares estimated addressable families against nearby competitor seats to frame how much demand headroom exists.",
+      trendSeries: [
+        { key: "addressableFamilies", label: "Addressable Families", color: "#2563eb" },
+        { key: "competitorSeats", label: "Nearby Competitor Seats", color: "#dc2626" },
+      ],
+      trendData: [
+        { year: 2019, addressableFamilies: 1210, competitorSeats: 1040 },
+        { year: 2020, addressableFamilies: 1260, competitorSeats: 1045 },
+        { year: 2021, addressableFamilies: 1325, competitorSeats: 1050 },
+        { year: 2022, addressableFamilies: 1395, competitorSeats: 1060 },
+        { year: 2023, addressableFamilies: 1475, competitorSeats: 1065 },
+        { year: 2024, addressableFamilies: 1560, competitorSeats: 1070 },
+        { year: 2025, addressableFamilies: 1635, competitorSeats: 1075, projected: true },
+        { year: 2026, addressableFamilies: 1715, competitorSeats: 1080, projected: true },
+        { year: 2027, addressableFamilies: 1805, competitorSeats: 1085, projected: true },
+        { year: 2028, addressableFamilies: 1890, competitorSeats: 1090, projected: true },
+        { year: 2029, addressableFamilies: 1975, competitorSeats: 1095, projected: true },
+      ],
+      distributionTitle: "Year 1 vs. Year 5 Enrollment Planning",
+      distributionSubtitle: "Use the market-depth framing to compare an initial operating target with a more mature five-year enrollment goal.",
+      distributionPrimaryLabel: "Year 1",
+      distributionComparisonLabel: "Year 5",
+      distributionData: [
+        { bucket: "Target enrollment", primary: 180, comparison: 320 },
+        { bucket: "Addressable families", primary: 1560, comparison: 1975 },
+        { bucket: "Competitor seats", primary: 1070, comparison: 1095 },
+      ],
+      highlightCards: [
+        { label: "Market depth", value: "4.8×", detail: "Addressable families relative to the reference enrollment target." },
+        { label: "Addressable market", value: "1,560", detail: "Propensity-weighted families currently estimated to be reachable." },
+        { label: "Reference size", value: "325 seats", detail: "Directional Year 5 scale used to size the early enrollment view." },
       ],
     },
   },
