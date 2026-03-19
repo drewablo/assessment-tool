@@ -181,6 +181,7 @@ AUTH_USERS=admin:admin            # comma-separated username:password pairs
 
 - Canonical current-state summary: `CURRENT_CODEBASE_STATUS.md`
 - Improvement execution plan: `PLATFORM_IMPROVEMENT_ROADMAP.md`
+- Deferred dashboard domain roadmap: `DEFERRED_DASHBOARD_DOMAINS.md`
 - Historical planning references: `REVIEW_NOTES.md`, `STAGE2_BENCHMARK_TUNING_PLAN.md`, `STAGE2_SPRING_PLANNING_DISCOVERY.md`, `V2_STRATEGIC_BLUEPRINT.md`
 
 ---
