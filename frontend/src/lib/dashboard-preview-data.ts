@@ -1,6 +1,7 @@
 import type { FeatureCollection } from "geojson";
 import {
   DashboardMetricOption,
+  DashboardReferenceLine,
   DashboardSeries,
   DashboardSidebarItem,
   DashboardTabItem,
@@ -12,6 +13,31 @@ import {
 import type { CompetitorSchool } from "@/lib/types";
 
 export type DashboardModuleSlug = "schools" | "elder-care" | "housing";
+
+export interface DashboardPreviewView {
+  title?: string;
+  description?: string;
+  tabs?: DashboardTabItem[];
+  metricOptions?: DashboardMetricOption[];
+  callout?: {
+    tone?: "info" | "warning";
+    title: string;
+    body: string;
+  };
+  trendTitle?: string;
+  trendSubtitle?: string;
+  trendSeries?: DashboardSeries[];
+  trendData?: DashboardTimeSeriesPoint[];
+  distributionTitle?: string;
+  distributionSubtitle?: string;
+  distributionData?: DashboardDistributionBucket[];
+  distributionPrimaryLabel?: string;
+  distributionComparisonLabel?: string;
+  distributionReferenceLine?: DashboardReferenceLine;
+  highlightCards?: Array<{ label: string; value: string; detail: string }>;
+  zipDrilldowns?: Record<string, ZipDrilldownData>;
+  tableVariant?: "competitor" | "partner";
+}
 
 export interface DashboardPreviewModule {
   slug: DashboardModuleSlug;
@@ -36,8 +62,10 @@ export interface DashboardPreviewModule {
   distributionTitle: string;
   distributionSubtitle: string;
   distributionData: DashboardDistributionBucket[];
+  distributionReferenceLine?: DashboardReferenceLine;
   zipDrilldowns: Record<string, ZipDrilldownData>;
   highlightCards: Array<{ label: string; value: string; detail: string }>;
+  sidebarViews?: Record<string, DashboardPreviewView>;
   address?: string;
   parameterFields?: ParameterBarField[];
   competitors?: CompetitorSchool[];
@@ -54,6 +82,45 @@ const sharedTabs: DashboardTabItem[] = [
   { key: "projections", label: "Projections" },
   { key: "map_view", label: "Map View" },
   { key: "drilldown", label: "ZIP Drilldown" },
+];
+
+const schoolsAffordabilityTabs: DashboardTabItem[] = [
+  { key: "summary", label: "Summary" },
+  { key: "median_income", label: "Median Income" },
+  { key: "high_income", label: "High Income ($200K+)" },
+  { key: "distribution", label: "Distribution" },
+  { key: "change_average", label: "Change in Average" },
+];
+
+const elderPartnershipTabs: DashboardTabItem[] = [
+  { key: "service_map", label: "Service Map" },
+  { key: "potential_partners", label: "Potential Partners" },
+];
+
+const housingCommunityProfileTabs: DashboardTabItem[] = [
+  { key: "population_trend", label: "Population Trend" },
+  { key: "renter_owner", label: "Renter vs. Owner" },
+  { key: "age_distribution", label: "Age Distribution" },
+  { key: "poverty_rate", label: "Poverty Rate" },
+];
+
+const schoolsStudentBodyTabs: DashboardTabItem[] = [
+  { key: "age_cohorts", label: "Age Cohorts" },
+  { key: "population_trend", label: "Population Trend" },
+  { key: "catchment_enrollment", label: "Catchment vs. Enrollment" },
+  { key: "catholic_affiliation", label: "Catholic Affiliation" },
+];
+
+const elderProjectionTabs: DashboardTabItem[] = [
+  { key: "cohort_breakdown", label: "Cohort Breakdown" },
+  { key: "care_implications", label: "Care Implications" },
+];
+
+const housingExistingResourcesTabs: DashboardTabItem[] = [
+  { key: "subsidized_map", label: "Subsidized Housing Map" },
+  { key: "project_table", label: "Project Table" },
+  { key: "supply_gap", label: "Supply Gap" },
+  { key: "pipeline", label: "Pipeline" },
 ];
 
 const schoolsConfig: DashboardPreviewModule = {
@@ -122,6 +189,11 @@ const schoolsConfig: DashboardPreviewModule = {
   ],
   distributionTitle: "2024 vs 2029 Distribution of Household Income",
   distributionSubtitle: "Comparison buckets show where tuition-paying capacity is expected to deepen over the next five years.",
+  distributionReferenceLine: {
+    value: 1000,
+    label: "Tuition-qualified family target",
+    color: "#f59e0b",
+  },
   distributionData: [
     { bucket: "<$50K", primary: 1342, comparison: 1210 },
     { bucket: "$50K-$75K", primary: 2140, comparison: 2265 },
@@ -183,6 +255,111 @@ const schoolsConfig: DashboardPreviewModule = {
     { label: "Top ZIP", value: "33971", detail: "Largest families-with-children base in the catchment." },
     { label: "Projected gain", value: "+36.3%", detail: "High-income families through 2029 in the strongest ZIP cluster." },
   ],
+  sidebarViews: {
+    affordability: {
+      title: "Affordability",
+      description: "Can families afford tuition, how much aid will be needed, and is the income mix moving toward the target price point?",
+      tabs: schoolsAffordabilityTabs,
+      metricOptions: [
+        { key: "medianFamilyIncome", label: "Median Family Income", format: "currency" },
+        { key: "familiesWithChildren", label: "Families with Children" },
+        { key: "schoolAgePopulation", label: "School-Age Population" },
+      ],
+      trendTitle: "High-Income Families ($200K+)",
+      trendSubtitle: "Observed and projected high-income-family growth provides the clearest directional read on tuition-paying capacity.",
+      distributionTitle: "Income Distribution vs. Tuition Threshold",
+      distributionSubtitle: "The reference marker shows the directional tuition-qualified family target used for affordability planning.",
+      distributionReferenceLine: {
+        value: 1000,
+        label: "Tuition-qualified family target",
+        color: "#f59e0b",
+      },
+      highlightCards: [
+        { label: "Median family income", value: "$79.6K", detail: "Weighted catchment median for families with children." },
+        { label: "High-income families", value: "6,450", detail: "Current families estimated above the $200K threshold." },
+        { label: "Aid pressure", value: "$12.4K", detail: "Directional average tuition gap after family-income screening." },
+      ],
+    },
+    student_body: {
+      title: "Student Body",
+      description: "Wave 2 starts with cohort sizing, school-age trend, and Catholic-affiliation context while the richer comparison view remains blocked on design review and client inputs.",
+      tabs: schoolsStudentBodyTabs,
+      callout: {
+        tone: "warning",
+        title: "Catchment comparison is not implemented yet",
+        body: "The new `CatchmentComparisonView` still needs design review and client enrollment-by-grade data, so this release focuses on the unblocked student-body sub-tabs.",
+      },
+      metricOptions: [
+        { key: "schoolAgePopulation", label: "School-Age Population" },
+        { key: "familiesWithChildren", label: "Families with Children" },
+        { key: "medianFamilyIncome", label: "Median Family Income", format: "currency" },
+      ],
+      trendTitle: "School-Age Population Trend",
+      trendSubtitle: "Current and projected school-age population remains the clearest directional signal available before client enrollment data is layered in.",
+      trendSeries: [
+        { key: "schoolAgePopulation", label: "School-Age Population", color: "#7c3aed" },
+        { key: "familiesWithChildren", label: "Families with Children", color: "#2563eb" },
+      ],
+      trendData: [
+        { year: 2019, schoolAgePopulation: 20140, familiesWithChildren: 9180 },
+        { year: 2020, schoolAgePopulation: 20410, familiesWithChildren: 9410 },
+        { year: 2021, schoolAgePopulation: 20795, familiesWithChildren: 9720 },
+        { year: 2022, schoolAgePopulation: 21120, familiesWithChildren: 10030 },
+        { year: 2023, schoolAgePopulation: 21430, familiesWithChildren: 10210 },
+        { year: 2024, schoolAgePopulation: 21780, familiesWithChildren: 10580 },
+        { year: 2025, schoolAgePopulation: 22010, familiesWithChildren: 10860, projected: true },
+        { year: 2026, schoolAgePopulation: 22270, familiesWithChildren: 11140, projected: true },
+        { year: 2027, schoolAgePopulation: 22590, familiesWithChildren: 11470, projected: true },
+        { year: 2028, schoolAgePopulation: 22910, familiesWithChildren: 11850, projected: true },
+        { year: 2029, schoolAgePopulation: 23260, familiesWithChildren: 12210, projected: true },
+      ],
+      distributionTitle: "Grade-Band Cohort Mix",
+      distributionSubtitle: "Wave 2 student-body work starts by sizing the broad grade bands most relevant to program planning.",
+      distributionPrimaryLabel: "Current",
+      distributionComparisonLabel: "5-Year",
+      distributionData: [
+        { bucket: "K-5", primary: 8740, comparison: 9185 },
+        { bucket: "6-8", primary: 4960, comparison: 5205 },
+        { bucket: "9-12", primary: 8080, comparison: 8870 },
+      ],
+      highlightCards: [
+        { label: "School-age pop.", value: "21,780", detail: "Current total across K–12 relevant ages in the catchment." },
+        { label: "Catholic estimate", value: "2,615", detail: "Directional estimate of Catholic-affiliated school-age population." },
+        { label: "Population trend", value: "Growing", detail: "School-age demand remains positive through the current forecast horizon." },
+      ],
+    },
+  },
+  competitors: [
+    {
+      name: "St. Michael Academy",
+      lat: 26.61,
+      lon: -81.86,
+      distance_miles: 4.2,
+      affiliation: "Catholic",
+      is_catholic: true,
+      city: "Fort Myers",
+      enrollment: 540,
+      gender: "Coed",
+      grade_level: "K-8",
+    },
+    {
+      name: "Gateway Preparatory School",
+      lat: 26.63,
+      lon: -81.78,
+      distance_miles: 6.8,
+      affiliation: "Independent",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 460,
+      gender: "Coed",
+      grade_level: "K-12",
+    },
+  ],
+  competitorCounts: {
+    catholicCount: 1,
+    totalPrivateCount: 2,
+    radiusMiles: 10,
+  },
 };
 
 const elderCareConfig: DashboardPreviewModule = {
@@ -306,6 +483,101 @@ const elderCareConfig: DashboardPreviewModule = {
     { label: "5-year growth", value: "+10.4%", detail: "Projected increase in the catchment 85+ cohort." },
     { label: "Quality gap", value: "2 ZIPs", detail: "Areas where senior concentration and weaker facility ratings overlap." },
   ],
+  sidebarViews: {
+    partnership_viability: {
+      title: "Partnership Viability",
+      description: "Identify operators that could assume care responsibility at the current site or absorb residents into nearby capacity.",
+      tabs: elderPartnershipTabs,
+      metricOptions: [
+        { key: "seniors75Plus", label: "Seniors 75+" },
+        { key: "seniors65Plus", label: "Seniors 65+" },
+        { key: "medianSeniorIncome", label: "Senior Household Income", format: "currency" },
+      ],
+      trendTitle: "Senior Density in the Service Map",
+      trendSubtitle: "Use the map and partner table together to compare where demand pressure overlaps with viable operator options.",
+      distributionTitle: "Care-Type Capacity Mix",
+      distributionSubtitle: "Directional bed mix shows whether nearby capacity skews toward assisted living, memory care, or skilled nursing.",
+      distributionData: [
+        { bucket: "Assisted Living", primary: 410, comparison: 460 },
+        { bucket: "Memory Care", primary: 165, comparison: 210 },
+        { bucket: "Skilled Nursing", primary: 520, comparison: 520 },
+        { bucket: "CCRC / Multi-level", primary: 190, comparison: 240 },
+      ],
+      highlightCards: [
+        { label: "Mission-aligned", value: "3 operators", detail: "Non-profit or faith-rooted operators within the immediate service area." },
+        { label: "Rated 4+", value: "2 facilities", detail: "Higher-quality options with current CMS ratings of four stars or above." },
+        { label: "Closest partner", value: "1.8 mi", detail: "Nearest viable operator with compatible care level and available scale." },
+      ],
+      tableVariant: "partner",
+    },
+    projections: {
+      title: "Projections",
+      description: "Wave 2 strengthens elder-care planning with a cohort-breakdown view plus concise care implications.",
+      tabs: elderProjectionTabs,
+      trendTitle: "Aging Pipeline Outlook",
+      trendSubtitle: "The trend view shows where the total senior population and the oldest cohort are both compounding over time.",
+      distributionTitle: "Current vs. 10-Year Senior Cohorts",
+      distributionSubtitle: "Cohort mix matters more than topline growth when estimating future care intensity.",
+      distributionPrimaryLabel: "Current",
+      distributionComparisonLabel: "10-Year",
+      distributionData: [
+        { bucket: "65-74", primary: 6290, comparison: 6720 },
+        { bucket: "75-84", primary: 5070, comparison: 5850 },
+        { bucket: "85+", primary: 3820, comparison: 4770 },
+      ],
+      highlightCards: [
+        { label: "10-year growth", value: "+29.1%", detail: "Projected increase in the oldest-age cohort through the long-range planning horizon." },
+        { label: "High-acuity share", value: "25.2%", detail: "Current share of seniors already estimated to be 85+." },
+        { label: "Planning signal", value: "Rising", detail: "The oldest cohort is growing faster than the younger senior cohorts." },
+      ],
+    },
+  },
+  competitors: [
+    {
+      name: "Hope Harbor Senior Living",
+      lat: 26.54,
+      lon: -81.89,
+      distance_miles: 1.8,
+      affiliation: "Mercy Health Ministries (Non-profit)",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 126,
+      gender: "Mission-aligned",
+      grade_level: "assisted_living",
+      mds_overall_rating: 4,
+    },
+    {
+      name: "Calusa Memory Support Center",
+      lat: 26.57,
+      lon: -81.91,
+      distance_miles: 3.4,
+      affiliation: "Sunrise Care LLC",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 84,
+      gender: "Private",
+      grade_level: "memory_care",
+      mds_overall_rating: 5,
+    },
+    {
+      name: "Gulf Coast Skilled Nursing",
+      lat: 26.51,
+      lon: -81.87,
+      distance_miles: 4.9,
+      affiliation: "Lee County Health System",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 142,
+      gender: "Public",
+      grade_level: "skilled_nursing",
+      mds_overall_rating: 3,
+    },
+  ],
+  competitorCounts: {
+    catholicCount: 0,
+    totalPrivateCount: 3,
+    radiusMiles: 10,
+  },
 };
 
 const housingConfig: DashboardPreviewModule = {
@@ -329,6 +601,7 @@ const housingConfig: DashboardPreviewModule = {
   metricOptions: [
     { key: "costBurdenedHouseholds", label: "Cost-Burdened Households" },
     { key: "renterHouseholds", label: "Renter Households" },
+    { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
     { key: "medianHouseholdIncome", label: "Median Household Income", format: "currency" },
   ],
   featureCollection: {
@@ -336,17 +609,17 @@ const housingConfig: DashboardPreviewModule = {
     features: [
       {
         type: "Feature",
-        properties: { zipCode: "33916", name: "33916 Fort Myers", costBurdenedHouseholds: 3225, renterHouseholds: 4410, medianHouseholdIncome: 39850 },
+        properties: { zipCode: "33916", name: "33916 Fort Myers", costBurdenedHouseholds: 3225, renterHouseholds: 4410, hudEligibleHouseholds: 2860, medianHouseholdIncome: 39850 },
         geometry: { type: "Polygon", coordinates: [[[-81.89, 26.62], [-81.82, 26.62], [-81.82, 26.68], [-81.89, 26.68], [-81.89, 26.62]]] },
       },
       {
         type: "Feature",
-        properties: { zipCode: "33901", name: "33901 Fort Myers", costBurdenedHouseholds: 2540, renterHouseholds: 3710, medianHouseholdIncome: 45210 },
+        properties: { zipCode: "33901", name: "33901 Fort Myers", costBurdenedHouseholds: 2540, renterHouseholds: 3710, hudEligibleHouseholds: 2195, medianHouseholdIncome: 45210 },
         geometry: { type: "Polygon", coordinates: [[[-81.91, 26.60], [-81.84, 26.60], [-81.84, 26.62], [-81.91, 26.62], [-81.91, 26.60]]] },
       },
       {
         type: "Feature",
-        properties: { zipCode: "33905", name: "33905 Fort Myers", costBurdenedHouseholds: 2145, renterHouseholds: 3180, medianHouseholdIncome: 43120 },
+        properties: { zipCode: "33905", name: "33905 Fort Myers", costBurdenedHouseholds: 2145, renterHouseholds: 3180, hudEligibleHouseholds: 1778, medianHouseholdIncome: 43120 },
         geometry: { type: "Polygon", coordinates: [[[-81.83, 26.59], [-81.74, 26.59], [-81.74, 26.66], [-81.83, 26.66], [-81.83, 26.59]]] },
       },
     ],
@@ -427,6 +700,134 @@ const housingConfig: DashboardPreviewModule = {
     { label: "Projected burden", value: "+14.5%", detail: "Expected growth in burdened households through 2029." },
     { label: "Resource gap", value: "2 ZIPs", detail: "High-need areas with the thinnest subsidized housing presence." },
   ],
+  sidebarViews: {
+    community_profile: {
+      title: "Community Profile",
+      description: "Wave 1 folds demographic trends into Community Profile so population, tenure, age, and poverty context live in one place.",
+      tabs: housingCommunityProfileTabs,
+      metricOptions: [
+        { key: "renterHouseholds", label: "Renter Households" },
+        { key: "costBurdenedHouseholds", label: "Cost-Burdened Households" },
+        { key: "medianHouseholdIncome", label: "Median Household Income", format: "currency" },
+      ],
+      trendTitle: "Population and Tenure Trend",
+      trendSubtitle: "Community Profile now carries the renter-versus-owner and population context that used to sit in a separate trends domain.",
+      trendSeries: [
+        { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+        { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+        { key: "renterHouseholds", label: "Renter Households", color: "#7c3aed" },
+      ],
+      trendData: [
+        { year: 2019, costBurdenedHouseholds: 6520, hudEligibleHouseholds: 4980, renterHouseholds: 10840 },
+        { year: 2020, costBurdenedHouseholds: 6835, hudEligibleHouseholds: 5140, renterHouseholds: 11160 },
+        { year: 2021, costBurdenedHouseholds: 7140, hudEligibleHouseholds: 5295, renterHouseholds: 11430 },
+        { year: 2022, costBurdenedHouseholds: 7425, hudEligibleHouseholds: 5510, renterHouseholds: 11710 },
+        { year: 2023, costBurdenedHouseholds: 7680, hudEligibleHouseholds: 5735, renterHouseholds: 11980 },
+        { year: 2024, costBurdenedHouseholds: 7910, hudEligibleHouseholds: 5890, renterHouseholds: 12300 },
+        { year: 2025, costBurdenedHouseholds: 8125, hudEligibleHouseholds: 6065, renterHouseholds: 12510, projected: true },
+        { year: 2026, costBurdenedHouseholds: 8350, hudEligibleHouseholds: 6240, renterHouseholds: 12740, projected: true },
+        { year: 2027, costBurdenedHouseholds: 8580, hudEligibleHouseholds: 6425, renterHouseholds: 12980, projected: true },
+        { year: 2028, costBurdenedHouseholds: 8805, hudEligibleHouseholds: 6615, renterHouseholds: 13235, projected: true },
+        { year: 2029, costBurdenedHouseholds: 9055, hudEligibleHouseholds: 6830, renterHouseholds: 13510, projected: true },
+      ],
+      distributionTitle: "Age and Income Distribution",
+      distributionSubtitle: "A combined demographic context view keeps household affordability and age structure visible in the core housing narrative.",
+      distributionData: [
+        { bucket: "Under 18", primary: 4180, comparison: 4315 },
+        { bucket: "18-34", primary: 5120, comparison: 5260 },
+        { bucket: "35-54", primary: 4865, comparison: 4975 },
+        { bucket: "55-64", primary: 1910, comparison: 2030 },
+        { bucket: "65+", primary: 2285, comparison: 2515 },
+      ],
+      highlightCards: [
+        { label: "Renter share", value: "54.6%", detail: "Current occupied-household share estimated to be renter-occupied." },
+        { label: "Poverty trend", value: "Improving", detail: "Directional poverty rate is easing slowly, but burden remains concentrated." },
+        { label: "Growth corridor", value: "33916 → 33905", detail: "Population and renter growth continue strongest along the eastern ZIP cluster." },
+      ],
+    },
+    existing_resources: {
+      title: "Existing Resources",
+      description: "Wave 2 begins surfacing existing subsidized inventory, approximate supply gaps, and QCT/DDA context while the overlay layer awaits design review.",
+      tabs: housingExistingResourcesTabs,
+      callout: {
+        tone: "warning",
+        title: "Boundary overlay is blocked pending design review",
+        body: "The new `BoundaryOverlayLayer` is required before QCT/DDA polygons can sit on top of the ZIP choropleth, so this first Wave 2 slice focuses on project-table and summary context.",
+      },
+      metricOptions: [
+        { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
+        { key: "costBurdenedHouseholds", label: "Cost-Burdened Households" },
+        { key: "renterHouseholds", label: "Renter Households" },
+      ],
+      trendTitle: "Existing Subsidized Supply vs. Need",
+      trendSubtitle: "The current view compares visible subsidized inventory against rising affordability pressure while pipeline data remains deferred.",
+      trendSeries: [
+        { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+        { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+      ],
+      distributionTitle: "Project Type Mix",
+      distributionSubtitle: "A simplified current-vs.-pipeline mix frames how the existing resource base is skewed across project categories.",
+      distributionPrimaryLabel: "Current",
+      distributionComparisonLabel: "Pipeline (if available)",
+      distributionData: [
+        { bucket: "LIHTC", primary: 520, comparison: 640 },
+        { bucket: "Section 202", primary: 118, comparison: 118 },
+        { bucket: "Public / PHA", primary: 205, comparison: 205 },
+        { bucket: "Other Subsidized", primary: 96, comparison: 128 },
+      ],
+      highlightCards: [
+        { label: "Approx. gap", value: "4,751 HH", detail: "HUD-eligible households minus visible subsidized units in the current inventory." },
+        { label: "QCT projects", value: "2", detail: "Projects currently carrying a QCT designation in the mock Wave 2 resource set." },
+        { label: "DDA projects", value: "1", detail: "Projects currently carrying a DDA designation in the mock Wave 2 resource set." },
+      ],
+    },
+  },
+  competitors: [
+    {
+      name: "Villa Capri Apartments",
+      lat: 26.61,
+      lon: -81.84,
+      distance_miles: 2.6,
+      affiliation: "LIHTC",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 144,
+      total_units: 144,
+      gender: "Family",
+      grade_level: "Affordable",
+    },
+    {
+      name: "Palm Grove Section 202",
+      lat: 26.63,
+      lon: -81.80,
+      distance_miles: 3.9,
+      affiliation: "HUD Section 202 | QCT",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 118,
+      total_units: 118,
+      gender: "Senior",
+      grade_level: "Section 202",
+    },
+    {
+      name: "River District Homes",
+      lat: 26.65,
+      lon: -81.84,
+      distance_miles: 4.4,
+      affiliation: "LIHTC | DDA",
+      is_catholic: false,
+      city: "Fort Myers",
+      enrollment: 96,
+      total_units: 96,
+      gender: "Family",
+      grade_level: "Affordable",
+    },
+  ],
+  competitorCounts: {
+    catholicCount: 0,
+    totalPrivateCount: 3,
+    radiusMiles: 10,
+  },
 };
 
 export const dashboardPreviewModules: DashboardPreviewModule[] = [

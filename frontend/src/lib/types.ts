@@ -231,6 +231,7 @@ export interface DemographicData {
   data_geography: string;
   data_confidence: "high" | "medium" | "low" | null;
   ministry_target_population?: number | null;
+  hud_eligible_households?: number | null;
   hud_tenant_households?: number | null;
   qct_designated_projects?: number | null;
   dda_designated_projects?: number | null;

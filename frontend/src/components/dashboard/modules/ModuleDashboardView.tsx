@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChoroplethMap,
   DashboardSidebar,
@@ -12,6 +12,7 @@ import {
   ZipDrilldownCard,
 } from "@/components/dashboard";
 import CompetitorTable from "@/components/CompetitorTable";
+import PartnerFacilityTable from "@/components/PartnerFacilityTable";
 import { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
 
 interface Props {
@@ -26,13 +27,53 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
   const [selectedZip, setSelectedZip] = useState(Object.keys(config.zipDrilldowns)[0] ?? "");
   const drilldownRef = useRef<HTMLDivElement>(null);
 
+  const activeView = config.sidebarViews?.[activeSidebar];
+  const currentTabs = activeView?.tabs ?? config.tabs;
+  const currentMetricOptions = activeView?.metricOptions ?? config.metricOptions;
+  const currentZipDrilldowns = activeView?.zipDrilldowns ?? config.zipDrilldowns;
+  const currentHighlightCards = activeView?.highlightCards ?? config.highlightCards;
+  const currentTrendTitle = activeView?.trendTitle ?? config.trendTitle;
+  const currentTrendSubtitle = activeView?.trendSubtitle ?? config.trendSubtitle;
+  const currentTrendSeries = activeView?.trendSeries ?? config.trendSeries;
+  const currentTrendData = activeView?.trendData ?? config.trendData;
+  const currentDistributionTitle = activeView?.distributionTitle ?? config.distributionTitle;
+  const currentDistributionSubtitle = activeView?.distributionSubtitle ?? config.distributionSubtitle;
+  const currentDistributionData = activeView?.distributionData ?? config.distributionData;
+  const currentDistributionPrimaryLabel = activeView?.distributionPrimaryLabel ?? "2024";
+  const currentDistributionComparisonLabel = activeView?.distributionComparisonLabel ?? "2029";
+  const currentDistributionReferenceLine = activeView?.distributionReferenceLine ?? config.distributionReferenceLine;
+  const currentCallout = activeView?.callout;
+
+  useEffect(() => {
+    const nextTab = currentTabs[0]?.key ?? "";
+    if (!currentTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(nextTab);
+    }
+  }, [activeTab, currentTabs]);
+
+  useEffect(() => {
+    const nextMetric = currentMetricOptions[0]?.key ?? "";
+    if (!currentMetricOptions.some((item) => item.key === metricKey)) {
+      setMetricKey(nextMetric);
+    }
+  }, [currentMetricOptions, metricKey]);
+
+  useEffect(() => {
+    const zipKeys = Object.keys(currentZipDrilldowns);
+    if (zipKeys.length === 0) return;
+    if (!(selectedZip in currentZipDrilldowns)) {
+      setSelectedZip(zipKeys[0]);
+    }
+  }, [currentZipDrilldowns, selectedZip]);
+
   const selectedMetric = useMemo(
-    () => config.metricOptions.find((item) => item.key === metricKey) ?? config.metricOptions[0],
-    [config.metricOptions, metricKey],
+    () => currentMetricOptions.find((item) => item.key === metricKey) ?? currentMetricOptions[0],
+    [currentMetricOptions, metricKey],
   );
 
-  const zipData = selectedZip ? config.zipDrilldowns[selectedZip] : undefined;
-  const showCompetitorTable = ["competitors", "market_landscape"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
+  const zipData = selectedZip ? currentZipDrilldowns[selectedZip] : undefined;
+  const showCompetitorTable = activeView?.tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
+  const showPartnerTable = activeView?.tableVariant === "partner" && (config.competitors?.length ?? 0) > 0;
 
   const wrapperClassName = `${embedded ? "rounded-2xl bg-[#f7f7fc] p-3 sm:p-4" : "min-h-screen bg-[#f7f7fc] px-4 py-6"} text-slate-900`;
 
@@ -62,7 +103,7 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
 
       {/* --- Highlight cards: compact inline strip --- */}
       <div className="flex flex-wrap gap-3">
-        {config.highlightCards.map((card) => (
+        {currentHighlightCards.map((card) => (
           <div key={card.label} className="flex items-baseline gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
             <span className="text-lg font-bold tracking-tight text-slate-900">{card.value}</span>
             <span className="text-xs text-slate-500">{card.label}</span>
@@ -79,21 +120,34 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
           <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">
-                {config.sidebarItems.find((item) => item.key === activeSidebar)?.title ?? config.title}
+                {activeView?.title ?? config.sidebarItems.find((item) => item.key === activeSidebar)?.title ?? config.title}
               </h2>
               <p className="text-xs text-slate-500">
-                {config.sidebarItems.find((item) => item.key === activeSidebar)?.description}
+                {activeView?.description ?? config.sidebarItems.find((item) => item.key === activeSidebar)?.description}
               </p>
             </div>
-            <TabbedSubview tabs={config.tabs} activeKey={activeTab} onChange={setActiveTab} />
+            <TabbedSubview tabs={currentTabs} activeKey={activeTab} onChange={setActiveTab} />
           </div>
 
           {/* Trend chart */}
+          {currentCallout ? (
+            <div
+              className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
+                currentCallout.tone === "warning"
+                  ? "border-amber-200 bg-amber-50 text-amber-900"
+                  : "border-sky-200 bg-sky-50 text-sky-900"
+              }`}
+            >
+              <p className="font-semibold">{currentCallout.title}</p>
+              <p className="mt-1">{currentCallout.body}</p>
+            </div>
+          ) : null}
+
           <TrendChart
-            title={config.trendTitle}
-            subtitle={config.trendSubtitle}
-            data={config.trendData}
-            series={config.trendSeries}
+            title={currentTrendTitle}
+            subtitle={currentTrendSubtitle}
+            data={currentTrendData}
+            series={currentTrendSeries}
             fileBaseName={`${config.slug}-trend`}
           />
 
@@ -104,11 +158,11 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
               subtitle="Click a ZIP to open the drilldown card."
               featureCollection={config.featureCollection}
               metric={selectedMetric}
-              availableMetrics={config.metricOptions}
+              availableMetrics={currentMetricOptions}
               selectedZip={selectedZip}
               onMetricChange={setMetricKey}
               onZipSelect={(zipCode) => {
-                if (zipCode in config.zipDrilldowns) {
+                if (zipCode in currentZipDrilldowns) {
                   setSelectedZip(zipCode);
                   requestAnimationFrame(() => {
                     drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -131,13 +185,14 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
 
           {/* Distribution chart */}
           <DistributionChart
-            title={config.distributionTitle}
-            subtitle={config.distributionSubtitle}
-            data={config.distributionData}
-            primaryLabel="2024"
-            comparisonLabel="2029"
+            title={currentDistributionTitle}
+            subtitle={currentDistributionSubtitle}
+            data={currentDistributionData}
+            primaryLabel={currentDistributionPrimaryLabel}
+            comparisonLabel={currentDistributionComparisonLabel}
             primaryColor="#6366f1"
             comparisonColor="#16a34a"
+            referenceLine={currentDistributionReferenceLine}
             fileBaseName={`${config.slug}-distribution`}
           />
 
@@ -151,6 +206,8 @@ export default function ModuleDashboardView({ config, embedded = false }: Props)
               ministryType={config.slug === "elder-care" ? "elder_care" : config.slug}
             />
           ) : null}
+
+          {showPartnerTable ? <PartnerFacilityTable facilities={config.competitors ?? []} /> : null}
         </section>
       </div>
     </div>
