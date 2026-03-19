@@ -67,7 +67,7 @@ function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
       {open ? (
         <div className="border-t border-slate-100 px-6 py-6">
           <div className="mb-6 flex flex-col gap-3">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {data.metrics.map((metric) => {
                 const badge = changeBadge(metric.current, metric.projected, metric.invertChange);
                 return (
