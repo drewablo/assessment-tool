@@ -6,13 +6,14 @@ import {
   BarChart,
   CartesianGrid,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import ChartActionBar from "./ChartActionBar";
-import { DashboardDistributionBucket, downloadCsv, downloadElementAsPng, formatDashboardValue } from "@/lib/dashboard";
+import { DashboardDistributionBucket, DashboardReferenceLine, downloadCsv, downloadElementAsPng, formatDashboardValue } from "@/lib/dashboard";
 
 interface Props {
   title: string;
@@ -22,6 +23,7 @@ interface Props {
   comparisonLabel?: string;
   primaryColor?: string;
   comparisonColor?: string;
+  referenceLine?: DashboardReferenceLine;
   fileBaseName?: string;
 }
 
@@ -33,6 +35,7 @@ function DistributionChart({
   comparisonLabel = "Projected",
   primaryColor = "#1d4ed8",
   comparisonColor = "#16a34a",
+  referenceLine,
   fileBaseName = "distribution-chart",
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -58,6 +61,19 @@ function DistributionChart({
             <YAxis type="category" dataKey="bucket" width={110} tick={{ fill: "#64748b", fontSize: 12 }} stroke="#cbd5e1" />
             <Tooltip formatter={(value: number) => formatDashboardValue(value, "number")} />
             <Legend />
+            {referenceLine ? (
+              <ReferenceLine
+                x={referenceLine.value}
+                stroke={referenceLine.color ?? "#f59e0b"}
+                strokeDasharray="4 4"
+                label={{
+                  value: referenceLine.label,
+                  position: "insideTopRight",
+                  fill: referenceLine.color ?? "#b45309",
+                  fontSize: 12,
+                }}
+              />
+            ) : null}
             <Bar dataKey="primary" name={primaryLabel} fill={primaryColor} radius={[0, 8, 8, 0]} />
             <Bar dataKey="comparison" name={comparisonLabel} fill={comparisonColor} radius={[0, 8, 8, 0]} />
           </BarChart>

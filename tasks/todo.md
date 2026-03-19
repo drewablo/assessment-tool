@@ -67,3 +67,42 @@
 - Corrected pipeline-status tracking names for HUD (`hud_lihtc_property`, `hud_lihtc_tenant`, `hud_qct_dda`) and expanded diagnostics.
 - Improved census catchment observability and county fallback normalization for 3-digit vs 5-digit FIPS variants.
 - Converted nested reliability metadata assignment to typed schema models and added tests.
+
+
+## Plan — Wave 1 deferred dashboard domains
+- [x] Review `DEFERRED_DASHBOARD_DOMAINS.md` and map the smallest Wave 1 implementation slice across preview/live dashboard code.
+- [x] Extend shared dashboard primitives for Wave 1 needs (`DistributionChart.referenceLine` and a partner-focused facility table component).
+- [x] Update dashboard module configuration/rendering so Wave 1 schools, elder-care, and housing views present the new domain framing.
+- [x] Run targeted frontend verification, then update review notes.
+
+## Review notes — Wave 1 deferred dashboard domains
+- Added a `DistributionChart.referenceLine` option for the schools affordability distribution view and wired the Wave 1 tuition-fit overlay into preview/live module configs.
+- Added a dedicated `PartnerFacilityTable` and surfaced it for the elder-care partnership-viability sidebar while keeping the shared competitor table for existing landscape views.
+- Updated preview/live dashboard metadata so schools affordability, elder-care partnership viability, and housing community-profile demographic trends have Wave 1-specific labels, tabs, and highlight cards.
+- Verified the frontend changes with the existing frontend tests plus a full TypeScript no-emit check; `next lint` could not run non-interactively because the repo does not yet have an ESLint config.
+
+## Plan — Wave 2 deferred dashboard domains
+- [x] Re-read `DEFERRED_DASHBOARD_DOMAINS.md`, review the prior Wave 1 implementation, and map the smallest credible Wave 2 slice that avoids blocked component work.
+- [x] Extend shared dashboard view metadata/rendering for Wave 2 callouts and timeframe labeling where needed.
+- [x] Add Wave 2 sidebar views for schools student body, elder-care projections, and housing existing resources, explicitly marking `CatchmentComparisonView` / `BoundaryOverlayLayer` blockers where applicable.
+- [x] Update live/backend dashboard metadata to surface the new Wave 2 framing without inventing unavailable data.
+- [x] Run targeted verification, then update review notes.
+
+## Review notes — Wave 2 deferred dashboard domains
+- Added shared Wave 2 view metadata for callouts and custom distribution timeframe labels so blocked component work can be called out directly inside the dashboard shell.
+- Added Wave 2 sidebar framing for schools `Student Body`, elder-care `Projections`, and housing `Existing Resources`, using only the unblocked slices supported by current data and explicitly labeling `CatchmentComparisonView` / `BoundaryOverlayLayer` blockers.
+- Updated live config generation and backend sidebar metadata so the new Wave 2 sidebars appear in live dashboards without inventing unavailable data contracts.
+- Verified the frontend changes with the existing frontend tests and a TypeScript no-emit check; a targeted backend dashboard-service test currently fails in this repo because `services.dashboard_service` no longer exports `_load_zcta_cache`, which appears to predate this patch.
+
+## Plan — Wave 3 deferred dashboard domains + data readiness
+- [x] Re-read `DEFERRED_DASHBOARD_DOMAINS.md`, review the current wave implementation, and scope the smallest honest Wave 3 slice that does not fake blocked components.
+- [x] Add the first Wave 3 schools enrollment dashboard slice using existing dashboard primitives while explicitly blocking the `ScenarioModeler`.
+- [x] Document and triage the early-start data tasks for HUD QCT/DDA, ACS B19037, CMS ownership/operator enrichment, and ACS B25003 verification.
+- [x] Run targeted verification, then update review notes.
+
+## Review notes — Wave 3 deferred dashboard domains + data readiness
+- Added the first Wave 3 schools `Enrollment` sidebar slice in preview/live configs, using current market-depth/addressable-market context and an explicit `ScenarioModeler` blocker callout instead of pretending that component already exists.
+- Updated the shared dashboard renderer so the enrollment sidebar can reuse the existing competitor table alongside the new view-specific callout and planning summaries.
+- Added `backend/docs/deferred_dashboard_data_readiness.md` to track the requested HUD QCT/DDA, ACS B19037, CMS ownership/operator, and ACS B25003 readiness tasks with current status and next actions.
+- Verified the Wave 3 starter with the frontend test suite and a TypeScript no-emit check.
+

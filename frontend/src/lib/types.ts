@@ -231,6 +231,7 @@ export interface DemographicData {
   data_geography: string;
   data_confidence: "high" | "medium" | "low" | null;
   ministry_target_population?: number | null;
+  hud_eligible_households?: number | null;
   hud_tenant_households?: number | null;
   qct_designated_projects?: number | null;
   dda_designated_projects?: number | null;
@@ -240,6 +241,9 @@ export interface DemographicData {
   seniors_below_200pct_poverty?: number | null;
   seniors_projected_5yr?: number | null;
   seniors_projected_10yr?: number | null;
+  total_addressable_market?: number | null;
+  reference_enrollment?: number | null;
+  market_depth_ratio?: number | null;
   elder_care_weighted_competitor_beds?: number | null;
   elder_care_bed_saturation_ratio?: number | null;
 }
