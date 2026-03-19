@@ -1,3 +1,20 @@
+# TODO — Deferred dashboard domain roadmap capture
+
+## Plan
+- [x] Review repository instructions and existing dashboard planning artifacts.
+- [x] Decide the smallest durable place to store the deferred dashboard domain roadmap.
+- [x] Add a dedicated planning document that captures domain priorities, sub-tabs, data needs, and required new shared components.
+- [x] Align dashboard preview metadata with the updated deferred-domain framing where the current copy is out of date.
+- [x] Update top-level documentation references so the roadmap is discoverable.
+- [x] Run targeted verification, then update review notes.
+
+## Review notes
+- Added a dedicated deferred-dashboard roadmap document with domain priorities, data requirements, and shared-component gating.
+- Updated the dashboard preview copy to reflect the new deferred-domain framing, especially elder-care partnership matchmaking and housing demographic trends folding into Community Profile.
+- Verified the frontend metadata changes with the existing frontend test suite and a standalone TypeScript check.
+
+---
+
 # TODO — Full codebase audit (excluding Stage 2 analysis)
 
 ## Plan
