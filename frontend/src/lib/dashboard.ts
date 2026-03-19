@@ -25,6 +25,12 @@ export interface DashboardDistributionBucket {
   comparison?: number | null;
 }
 
+export interface DashboardReferenceLine {
+  value: number;
+  label: string;
+  color?: string;
+}
+
 export interface ZipMetricSnapshot {
   label: string;
   current: number;

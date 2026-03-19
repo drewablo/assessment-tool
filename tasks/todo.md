@@ -67,3 +67,16 @@
 - Corrected pipeline-status tracking names for HUD (`hud_lihtc_property`, `hud_lihtc_tenant`, `hud_qct_dda`) and expanded diagnostics.
 - Improved census catchment observability and county fallback normalization for 3-digit vs 5-digit FIPS variants.
 - Converted nested reliability metadata assignment to typed schema models and added tests.
+
+
+## Plan — Wave 1 deferred dashboard domains
+- [x] Review `DEFERRED_DASHBOARD_DOMAINS.md` and map the smallest Wave 1 implementation slice across preview/live dashboard code.
+- [x] Extend shared dashboard primitives for Wave 1 needs (`DistributionChart.referenceLine` and a partner-focused facility table component).
+- [x] Update dashboard module configuration/rendering so Wave 1 schools, elder-care, and housing views present the new domain framing.
+- [x] Run targeted frontend verification, then update review notes.
+
+## Review notes — Wave 1 deferred dashboard domains
+- Added a `DistributionChart.referenceLine` option for the schools affordability distribution view and wired the Wave 1 tuition-fit overlay into preview/live module configs.
+- Added a dedicated `PartnerFacilityTable` and surfaced it for the elder-care partnership-viability sidebar while keeping the shared competitor table for existing landscape views.
+- Updated preview/live dashboard metadata so schools affordability, elder-care partnership viability, and housing community-profile demographic trends have Wave 1-specific labels, tabs, and highlight cards.
+- Verified the frontend changes with the existing frontend tests plus a full TypeScript no-emit check; `next lint` could not run non-interactively because the repo does not yet have an ESLint config.
