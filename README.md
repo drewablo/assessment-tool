@@ -199,15 +199,15 @@ The revised dashboard/data flow now depends on a few ingest steps beyond the ori
 From `backend/` run:
 
 ```bash
-python -m pipeline.cli init-db
-python -m pipeline.cli ingest-census --vintage 2022
-python -m pipeline.cli ingest-census-history
-python -m pipeline.cli ingest-zcta
-python -m pipeline.cli ingest-schools
-python -m pipeline.cli ingest-nais
-python -m pipeline.cli ingest-elder-care
-python -m pipeline.cli ingest-housing
-python -m pipeline.cli ingest-hud-section202
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli init-db
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-census --vintage 2022
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-census-history
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli python -m pipeline.cli ingest-zcta
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-schools
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-nais
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-elder-care
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-housing
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-hud-section202
 ```
 
 ### Full refresh shortcut
@@ -215,7 +215,7 @@ python -m pipeline.cli ingest-hud-section202
 For a one-command refresh, use:
 
 ```bash
-python -m pipeline.cli ingest-all
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python3 -m pipeline.cli ingest-all
 ```
 
 That now runs, in order, current ACS ingest, historical ACS vintages, ZCTA cache warm-up, PSS ingest, NAIS reconciliation, elder-care ingest, housing ingest, and HUD Section 202 ingest.
