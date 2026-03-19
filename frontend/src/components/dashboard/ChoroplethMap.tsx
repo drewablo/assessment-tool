@@ -10,6 +10,7 @@ import {
   downloadElementAsPng,
   formatDashboardValue,
 } from "@/lib/dashboard";
+import type { CompetitorSchool } from "@/lib/types";
 
 interface Props {
   title: string;
@@ -21,6 +22,11 @@ interface Props {
   onMetricChange: (key: string) => void;
   onZipSelect?: (zipCode: string) => void;
   fileBaseName?: string;
+  competitors?: CompetitorSchool[];
+  ministryType?: "schools" | "housing" | "elder_care";
+  centerLabel?: string;
+  centerLat?: number;
+  centerLon?: number;
 }
 
 function getColor(value: number, min: number, max: number) {
@@ -41,11 +47,17 @@ function ChoroplethMap({
   onMetricChange,
   onZipSelect,
   fileBaseName = "choropleth-map",
+  competitors,
+  ministryType = "schools",
+  centerLabel,
+  centerLat,
+  centerLon,
 }: Props) {
   const shellRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
   const layerRef = useRef<import("leaflet").GeoJSON | null>(null);
+  const markerLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const metricRows = useMemo(
     () =>
       featureCollection.features.map((feature) => ({
@@ -102,6 +114,57 @@ function ChoroplethMap({
       if (bounds.isValid()) {
         mapInstanceRef.current.fitBounds(bounds.pad(0.08));
       }
+
+      // --- Competitor / facility markers ---
+      markerLayerRef.current?.clearLayers();
+      markerLayerRef.current = L.layerGroup().addTo(mapInstanceRef.current);
+
+      // Center pin (analysis subject)
+      if (centerLat != null && centerLon != null) {
+        const centerIcon = L.divIcon({
+          className: "",
+          html: `<div style="width:18px;height:18px;background:#172d57;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.4);"></div>`,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        });
+        L.marker([centerLat, centerLon], { icon: centerIcon })
+          .addTo(markerLayerRef.current)
+          .bindPopup(`<strong>${centerLabel ?? "Analysis center"}</strong>`);
+      }
+
+      if (competitors && competitors.length > 0) {
+        for (const comp of competitors) {
+          if (!Number.isFinite(comp.lat) || !Number.isFinite(comp.lon)) continue;
+          const isSection202 = comp.affiliation === "HUD Section 202";
+          const color =
+            ministryType === "schools" && comp.is_catholic
+              ? "#3b82f6"
+              : isSection202
+              ? "#f59e0b"
+              : "#9ca3af";
+          const icon = L.divIcon({
+            className: "",
+            html: `<div style="width:10px;height:10px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [10, 10],
+            iconAnchor: [5, 5],
+          });
+
+          let popup = `<strong>${comp.name}</strong><br>${comp.affiliation}<br>${comp.distance_miles} mi`;
+          if (isSection202) {
+            const addr = [comp.street_address, comp.city, comp.state, comp.zip_code].filter(Boolean);
+            if (addr.length) popup += `<br><span style="color:#666">${addr.join(", ")}</span>`;
+            if (comp.enrollment) popup += `<br>${comp.enrollment.toLocaleString()} assisted units`;
+            if (comp.total_units) popup += ` / ${comp.total_units.toLocaleString()} total`;
+          } else if (comp.enrollment) {
+            const unit = ministryType === "schools" ? "students" : ministryType === "housing" ? "units" : "beds";
+            popup += `<br>${comp.enrollment.toLocaleString()} ${unit}`;
+          }
+
+          L.marker([comp.lat, comp.lon], { icon })
+            .addTo(markerLayerRef.current!)
+            .bindPopup(popup, { maxWidth: 260 });
+        }
+      }
     }
 
     void init();
@@ -113,8 +176,9 @@ function ChoroplethMap({
         mapInstanceRef.current = null;
       }
       layerRef.current = null;
+      markerLayerRef.current = null;
     };
-  }, [featureCollection, metric, onZipSelect, selectedZip]);
+  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon]);
 
   const isEmpty = featureCollection.features.length === 0;
 
@@ -158,6 +222,32 @@ function ChoroplethMap({
           </div>
           <p>Click a ZIP to drive the drilldown card.</p>
         </div>
+        {(competitors?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+            {centerLat != null && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-[#172d57]" />
+                Analysis center
+              </span>
+            )}
+            {ministryType === "schools" && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-blue-500" />
+                Catholic school
+              </span>
+            )}
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-gray-400" />
+              {ministryType === "schools" ? "Other private" : ministryType === "housing" ? "Housing project" : "Elder care facility"}
+            </span>
+            {ministryType === "housing" && competitors?.some((c) => c.affiliation === "HUD Section 202") && (
+              <span className="flex items-center gap-1.5">
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-white bg-amber-400" />
+                HUD Section 202
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
