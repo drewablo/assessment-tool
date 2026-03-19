@@ -963,12 +963,34 @@ async def build_dashboard_response(*, request: AnalysisRequest, result: Analysis
     )
     metadata.freshness = {**(metadata.freshness or {}), "zipSelectionMethod": spatial.selection_method, "zipCount": len(spatial.zip_codes)}
 
+    # Load QCT/DDA boundary overlays for housing module
+    boundary_overlays = None
+    if result.ministry_type == "housing":
+        try:
+            USE_DB = os.environ.get("USE_DB", "false").lower() == "true"
+            if USE_DB:
+                from db.connection import get_session
+                from db.queries import get_qct_dda_boundaries_near
+
+                async with get_session() as session:
+                    features = await get_qct_dda_boundaries_near(
+                        session,
+                        lat=result.lat,
+                        lon=result.lon,
+                        radius_miles=request.drive_minutes * 0.75,  # approximate drive-to-radius
+                    )
+                if features:
+                    boundary_overlays = {"type": "FeatureCollection", "features": features}
+        except Exception as exc:
+            logger.warning("QCT/DDA boundary overlay load failed (non-blocking): %s", exc)
+
     return DashboardResponse(
         catchment=DashboardCatchment(
             center={"lat": result.lat, "lng": result.lon, "address": location.get("matched_address") or request.address},
             drive_time_minutes=request.drive_minutes,
             zip_codes=spatial.zip_codes,
             geojson=feature_collection,
+            boundary_overlays=boundary_overlays,
         ),
         data=module_data,
         metadata=metadata,

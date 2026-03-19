@@ -69,6 +69,8 @@ export interface DashboardPreviewModule {
   address?: string;
   centerLat?: number;
   centerLon?: number;
+  boundaryOverlays?: FeatureCollection;
+  analysisResult?: import("@/lib/types").AnalysisResponse;
   parameterFields?: ParameterBarField[];
   competitors?: CompetitorSchool[];
   competitorCounts?: {

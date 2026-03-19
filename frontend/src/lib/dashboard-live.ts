@@ -64,9 +64,9 @@ function sidebarViewsForModule(
           { key: "catholic_affiliation", label: "Catholic Affiliation" },
         ],
         callout: {
-          tone: "warning",
-          title: "Catchment comparison is blocked for now",
-          body: "The Wave 2 `CatchmentComparisonView` still needs design review and client enrollment-by-grade inputs, so this release surfaces the available population-trend and Catholic-affiliation context first.",
+          tone: "info",
+          title: "Catchment comparison requires your enrollment data",
+          body: "Select the \"Catchment vs. Enrollment\" tab and enter your current enrollment by grade to compare against the catchment's school-age population.",
         },
         metricOptions: [
           { key: "schoolAgePopulation", label: "School-Age Population" },
@@ -122,9 +122,9 @@ function sidebarViewsForModule(
           { key: "enrollment_scenarios", label: "Enrollment Scenarios" },
         ],
         callout: {
-          tone: "warning",
-          title: "Scenario modeler is not implemented yet",
-          body: "The Wave 3 `ScenarioModeler` still requires design review, so this release exposes the available market-depth and competitor-overlap context first.",
+          tone: "info",
+          title: "Financial scenario modeler available",
+          body: "Select the \"Enrollment Scenarios\" tab to access the interactive What-If financial model with enrollment, tuition, and aid assumptions.",
         },
         metricOptions: [
           { key: "familiesWithChildren", label: "Families with Children" },
@@ -295,9 +295,9 @@ function sidebarViewsForModule(
           { key: "pipeline", label: "Pipeline" },
         ],
         callout: {
-          tone: "warning",
-          title: "Boundary overlay remains blocked",
-          body: "The dedicated `BoundaryOverlayLayer` still needs design review before QCT/DDA polygons can be rendered on top of the ZIP choropleth, so this release focuses on table + summary context first.",
+          tone: "info",
+          title: "QCT/DDA boundary overlays available",
+          body: "When boundary data is available for this catchment, QCT and DDA designation polygons are rendered on the map with dashed outlines.",
         },
         metricOptions: [
           { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
@@ -374,6 +374,8 @@ export function toDashboardModuleConfig(
     address: payload.catchment.center.address,
     centerLat: payload.catchment.center.lat,
     centerLon: payload.catchment.center.lng,
+    boundaryOverlays: (payload.catchment.boundary_overlays ?? undefined) as FeatureCollection | undefined,
+    analysisResult: analysisResult ?? undefined,
     primaryLabel: payload.data.primary_label,
     primaryValue: payload.data.primary_value,
     secondaryLabel: payload.data.secondary_label,

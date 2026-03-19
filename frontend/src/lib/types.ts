@@ -455,6 +455,7 @@ export interface DashboardCatchmentResponse {
   drive_time_minutes: number;
   zip_codes: string[];
   geojson: object;
+  boundary_overlays?: object | null;
 }
 
 export interface DashboardMetadataResponse {

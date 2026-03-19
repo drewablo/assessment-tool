@@ -233,6 +233,7 @@ async def _get_nearby_elder_care_db(*, lat: float, lon: float, radius_miles: flo
                 "ownership": facility.ownership_type,
                 "owner_name": facility.ownership_type,
                 "city": facility.city,
+                "state": facility.state,
             }
         )
     return mapped
@@ -504,6 +505,7 @@ async def analyze_elder_care(
                 affiliation=_facility_affiliation(f),
                 is_catholic=False,
                 city=f.get("city"),
+                state=f.get("state"),
                 enrollment=_facility_beds(f) or None,
                 gender=f.get("certification") or "N/A",
                 grade_level=f.get("care_level", "Elder Care"),

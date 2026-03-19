@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -12,8 +13,11 @@ import {
   ZipDrilldownCard,
 } from "@/components/dashboard";
 import CompetitorTable from "@/components/CompetitorTable";
+import CatchmentComparisonView from "@/components/dashboard/CatchmentComparisonView";
 import PartnerFacilityTable from "@/components/PartnerFacilityTable";
 import { DashboardPreviewModule } from "@/lib/dashboard-preview-data";
+
+const WhatIfSimulator = dynamic(() => import("@/components/WhatIfSimulator"), { ssr: false });
 
 interface Props {
   config: DashboardPreviewModule;
@@ -76,6 +80,8 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
   const zipData = selectedZip ? currentZipDrilldowns[selectedZip] : undefined;
   const showCompetitorTable = activeView?.tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources", "enrollment"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
   const showPartnerTable = activeView?.tableVariant === "partner" && (config.competitors?.length ?? 0) > 0;
+  const showScenarioModeler = activeSidebar === "enrollment" && activeTab === "enrollment_scenarios" && config.slug === "schools" && config.analysisResult;
+  const showCatchmentComparison = activeSidebar === "student_body" && activeTab === "catchment_enrollment" && config.slug === "schools";
 
   const wrapperClassName = `${embedded ? "rounded-2xl bg-[#f7f7fc] p-3 sm:p-4" : "min-h-screen bg-[#f7f7fc] px-4 py-6"} text-slate-900`;
 
@@ -177,6 +183,7 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
               centerLabel={config.address}
               centerLat={config.centerLat}
               centerLon={config.centerLon}
+              boundaryOverlays={config.boundaryOverlays}
             />
 
             {zipData ? (
@@ -215,6 +222,20 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
           ) : null}
 
           {showPartnerTable ? <PartnerFacilityTable facilities={config.competitors ?? []} /> : null}
+
+          {/* Scenario modeler (WhatIfSimulator) for schools enrollment tab */}
+          {showScenarioModeler && config.analysisResult ? (
+            <WhatIfSimulator result={config.analysisResult} />
+          ) : null}
+
+          {/* Catchment vs. enrollment comparison for schools student body tab */}
+          {showCatchmentComparison ? (
+            <CatchmentComparisonView
+              schoolAgePopulation={config.analysisResult?.demographics.school_age_population}
+              estimatedCatholicSchoolAge={config.analysisResult?.demographics.estimated_catholic_school_age}
+              estimatedCatholicPct={config.analysisResult?.demographics.estimated_catholic_pct}
+            />
+          ) : null}
         </section>
       </div>
     </div>
