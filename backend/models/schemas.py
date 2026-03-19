@@ -558,6 +558,7 @@ class DashboardCatchment(BaseModel):
     drive_time_minutes: int
     zip_codes: List[str] = Field(default_factory=list)
     geojson: Dict[str, object]
+    boundary_overlays: Optional[Dict[str, object]] = None
 
 
 class DashboardMetadata(BaseModel):

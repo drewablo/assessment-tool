@@ -14,9 +14,9 @@ interface Props {
 
 function ownershipBucket(value: string | null | undefined) {
   const text = (value ?? "").toLowerCase();
-  if (text.includes("non-profit") || text.includes("nonprofit") || text.includes("faith")) return "Non-profit";
-  if (text.includes("government") || text.includes("county") || text.includes("state")) return "Public";
-  if (text.includes("for profit") || text.includes("corporation") || text.includes("llc")) return "For-profit";
+  if (text.includes("non-profit") || text.includes("nonprofit") || text.includes("faith") || text.includes("church") || text.includes("religious")) return "Non-profit";
+  if (text.includes("government") || text.includes("county") || text.includes("state licensed") || text.includes("state ") || text.includes("municipal")) return "Public";
+  if (text.includes("for profit") || text.includes("for-profit") || text.includes("corporation") || text.includes("llc") || text.includes("inc.") || text.includes("partnership")) return "For-profit";
   return "Unknown";
 }
 

@@ -617,3 +617,61 @@ async def get_nearby_section_202(
     )
     result = await session.execute(stmt)
     return [(row[0], row[1]) for row in result.all()]
+
+
+async def get_qct_dda_boundaries_near(
+    session: AsyncSession,
+    *,
+    lat: float,
+    lon: float,
+    radius_miles: float,
+    designation_year: int | None = None,
+) -> list[dict]:
+    """Return QCT/DDA boundary polygons that intersect a radius around the analysis center.
+
+    Returns GeoJSON-ready features with designation_type, geoid, and area_name.
+    """
+    point = _make_point(lat, lon)
+    distance_meters = radius_miles * METERS_PER_MILE
+
+    year_filter = (
+        HudQctDdaDesignation.designation_year == designation_year
+        if designation_year
+        else True
+    )
+
+    stmt = (
+        select(
+            HudQctDdaDesignation.designation_type,
+            HudQctDdaDesignation.geoid11,
+            HudQctDdaDesignation.area_name,
+            HudQctDdaDesignation.designation_year,
+            func.ST_AsGeoJSON(HudQctDdaDesignation.boundary).label("geojson"),
+        )
+        .where(
+            year_filter,
+            HudQctDdaDesignation.boundary.isnot(None),
+            func.ST_DWithin(
+                cast(HudQctDdaDesignation.boundary, _GEOGRAPHY),
+                _geo(point),
+                distance_meters,
+            ),
+        )
+        .order_by(HudQctDdaDesignation.designation_type, HudQctDdaDesignation.geoid11)
+    )
+    rows = (await session.execute(stmt)).all()
+    output: list[dict] = []
+    for designation_type, geoid11, area_name, d_year, geojson_str in rows:
+        if not geojson_str:
+            continue
+        output.append({
+            "type": "Feature",
+            "properties": {
+                "designation_type": designation_type,
+                "geoid11": geoid11,
+                "area_name": area_name,
+                "designation_year": d_year,
+            },
+            "geometry": json.loads(geojson_str),
+        })
+    return output

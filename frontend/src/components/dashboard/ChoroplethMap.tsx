@@ -27,6 +27,7 @@ interface Props {
   centerLabel?: string;
   centerLat?: number;
   centerLon?: number;
+  boundaryOverlays?: FeatureCollection;
 }
 
 function getColor(value: number, min: number, max: number) {
@@ -52,12 +53,14 @@ function ChoroplethMap({
   centerLabel,
   centerLat,
   centerLon,
+  boundaryOverlays,
 }: Props) {
   const shellRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
   const layerRef = useRef<import("leaflet").GeoJSON | null>(null);
   const markerLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
+  const overlayRef = useRef<import("leaflet").GeoJSON | null>(null);
   const metricRows = useMemo(
     () =>
       featureCollection.features.map((feature) => ({
@@ -113,6 +116,28 @@ function ChoroplethMap({
       const bounds = layerRef.current.getBounds();
       if (bounds.isValid()) {
         mapInstanceRef.current.fitBounds(bounds.pad(0.08));
+      }
+
+      // --- QCT/DDA boundary overlays ---
+      overlayRef.current?.remove();
+      if (boundaryOverlays && boundaryOverlays.features.length > 0) {
+        overlayRef.current = L.geoJSON(boundaryOverlays as GeoJsonObject, {
+          style: (feature) => {
+            const isQCT = feature?.properties?.designation_type === "QCT";
+            return {
+              color: isQCT ? "#dc2626" : "#2563eb",
+              weight: 2,
+              dashArray: "6 4",
+              fillColor: isQCT ? "#dc2626" : "#2563eb",
+              fillOpacity: 0.08,
+            };
+          },
+          onEachFeature: (feature, layer) => {
+            const dtype = feature.properties?.designation_type ?? "Unknown";
+            const name = feature.properties?.area_name ?? feature.properties?.geoid11 ?? "";
+            layer.bindTooltip(`${dtype}: ${name}`);
+          },
+        }).addTo(mapInstanceRef.current!);
       }
 
       // --- Competitor / facility markers ---
@@ -177,8 +202,9 @@ function ChoroplethMap({
       }
       layerRef.current = null;
       markerLayerRef.current = null;
+      overlayRef.current = null;
     };
-  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon]);
+  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon, boundaryOverlays]);
 
   const isEmpty = featureCollection.features.length === 0;
 
@@ -246,6 +272,18 @@ function ChoroplethMap({
                 HUD Section 202
               </span>
             )}
+          </div>
+        )}
+        {(boundaryOverlays?.features?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded border-2 border-dashed border-red-500 bg-red-500/10" />
+              QCT boundary
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-3 w-5 rounded border-2 border-dashed border-blue-500 bg-blue-500/10" />
+              DDA boundary
+            </span>
           </div>
         )}
       </div>
