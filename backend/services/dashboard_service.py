@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import math
 import os
 import re
 from collections import defaultdict
@@ -136,6 +137,24 @@ def _load_zcta_bbox_index() -> dict[str, ZctaBboxEntry]:
         except Exception:
             logger.warning("Unable to read legacy ZCTA bbox index", exc_info=True)
 
+    if ZCTA_CACHE_PATH.exists():
+        try:
+            with gzip.open(ZCTA_CACHE_PATH, "rt", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            features = payload.get("features", []) if isinstance(payload, dict) else []
+            index = {}
+            for feature in features:
+                zip_code = str((feature.get("properties") or {}).get("zipCode") or (feature.get("properties") or {}).get("ZCTA5CE10") or "").strip()
+                if not zip_code or not feature.get("geometry"):
+                    continue
+                geom = shape(feature["geometry"])
+                index[zip_code] = ZctaBboxEntry(zip_code=zip_code, bounds=geom.bounds)
+            if index:
+                logger.info("Loaded legacy single-file ZCTA cache from %s: %d entries", ZCTA_CACHE_PATH, len(index))
+                return index
+        except Exception:
+            logger.warning("Unable to read legacy single-file ZCTA cache", exc_info=True)
+
     logger.warning("No ZCTA bbox index found. Run: python -m pipeline.cli ingest-zcta")
     return {}
 
@@ -161,8 +180,26 @@ def _load_features_for_zips(zip_codes: set[str]) -> dict[str, dict]:
             logger.debug("Unable to read ZCTA file for %s", zip_code)
             continue
 
-    logger.debug("Loaded %d of %d requested ZIP features from individual files", len(result), len(zip_codes))
+    if result or not ZCTA_CACHE_PATH.exists():
+        logger.debug("Loaded %d of %d requested ZIP features from individual files", len(result), len(zip_codes))
+        return result
+
+    try:
+        with gzip.open(ZCTA_CACHE_PATH, "rt", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        for feature in payload.get("features", []):
+            props = feature.get("properties") or {}
+            zip_code = str(props.get("zipCode") or props.get("ZCTA5CE10") or "").strip()
+            if zip_code in zip_codes:
+                result[zip_code] = feature
+    except Exception:
+        logger.debug("Unable to read legacy single-file ZCTA cache for requested ZIP features", exc_info=True)
+
+    logger.debug("Loaded %d of %d requested ZIP features from legacy cache", len(result), len(zip_codes))
     return result
+
+
+_load_zcta_cache = _load_zcta_bbox_index
 
 
 def _clean_zip(value: Any) -> str | None:
@@ -472,16 +509,7 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
                 except Exception:
                     pass
 
-            for competitor in result.competitor_schools:
-                zip_code = _clean_zip(competitor.zip_code)
-                if not zip_code or zip_code not in current_by_zip:
-                    continue
-                row = current_by_zip[zip_code]
-                row["competitor_count"] += 1
-                row["competitor_units"] += float(competitor.total_units or competitor.enrollment or 0)
-                if competitor.mds_overall_rating is not None:
-                    row["competitor_rating_sum"] += float(competitor.mds_overall_rating)
-                    row["competitor_rating_count"] += 1
+            _assign_competitors_to_zips(result.competitor_schools, current_by_zip, prepared)
 
             if not tract_to_zip:
                 return {}, {}, data_year
@@ -506,6 +534,9 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
                 bucket["families_with_children"] += float(hist.families_with_own_children or 0)
                 bucket["seniors_65_plus"] += float((hist.population_65_74 or 0) + (hist.population_75_plus or 0))
                 bucket["seniors_75_plus"] += float(hist.population_75_plus or 0)
+                current_row = current_by_zip.get(zip_code, {})
+                renter_ratio = current_row.get("renter_households", 0.0) / max(current_row.get("total_households", 0.0), 1.0)
+                bucket["renter_households"] += households * renter_ratio
                 if hist.median_household_income:
                     bucket["median_household_income_weighted_sum"] += float(hist.median_household_income) * max(pop, 1.0)
                     bucket["median_household_income_weight"] += max(pop, 1.0)
@@ -514,6 +545,69 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
     except Exception:
         logger.warning("Dashboard DB aggregate load failed; falling back to spatial weighting", exc_info=True)
         return {}, {}, None
+
+
+def _assign_competitors_to_zips(
+    competitors: list[Any],
+    current_by_zip: dict[str, dict[str, float]],
+    prepared_zips: dict[str, Any],
+) -> None:
+    for competitor in competitors:
+        zip_code = _clean_zip(getattr(competitor, "zip_code", None))
+        if not zip_code or zip_code not in current_by_zip:
+            lat = getattr(competitor, "lat", None)
+            lon = getattr(competitor, "lon", None)
+            if lat is None or lon is None:
+                continue
+            try:
+                lat = float(lat)
+                lon = float(lon)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(lat) and math.isfinite(lon)):
+                continue
+            point = Point(lon, lat)
+            zip_code = next(
+                (candidate_zip for candidate_zip, prepared_geom in prepared_zips.items() if prepared_geom.contains(point) or prepared_geom.intersects(point)),
+                None,
+            )
+        if not zip_code or zip_code not in current_by_zip:
+            continue
+        row = current_by_zip[zip_code]
+        row["competitor_count"] += 1
+        row["competitor_units"] += float(getattr(competitor, "total_units", None) or getattr(competitor, "enrollment", None) or 0)
+        rating = getattr(competitor, "mds_overall_rating", None)
+        if rating is not None:
+            row["competitor_rating_sum"] += float(rating)
+            row["competitor_rating_count"] += 1
+
+
+def _backcast_series(current_value: float, pct_change: float | None, target_years: list[int], current_year: int = 2022) -> dict[int, float]:
+    if current_value < 0:
+        return {}
+    if pct_change is None:
+        return {year: current_value for year in target_years}
+
+    start_year = min(target_years) if target_years else current_year
+    year_span = max(current_year - start_year, 1)
+    start_value = current_value / (1.0 + (pct_change / 100.0)) if pct_change > -100 else current_value
+    if start_value <= 0:
+        return {year: current_value for year in target_years}
+
+    annual_rate = (current_value / start_value) ** (1.0 / year_span) - 1.0 if start_value > 0 else 0.0
+    history: dict[int, float] = {}
+    for year in target_years:
+        delta = current_year - year
+        history[year] = current_value / ((1.0 + annual_rate) ** delta) if delta else current_value
+    return history
+
+
+def _history_point(value: float, income: float, population: float) -> dict[str, float]:
+    return {
+        "total_population": value,
+        "median_household_income_weighted_sum": income * max(population, 1.0),
+        "median_household_income_weight": max(population, 1.0),
+    }
 
 
 def _weighted_income(row: dict[str, float], prefix: str) -> float:
@@ -557,44 +651,44 @@ def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialC
         row["median_family_income_weighted_sum"] = median_income * max(households * weight, 1.0)
         row["median_family_income_weight"] = max(households * weight, 1.0)
 
-    for competitor in result.competitor_schools:
-        zip_code = _clean_zip(competitor.zip_code)
-        if not zip_code or zip_code not in current_by_zip:
-            continue
-        row = current_by_zip[zip_code]
-        row["competitor_count"] += 1
-        row["competitor_units"] += float(competitor.total_units or competitor.enrollment or 0)
-        if competitor.mds_overall_rating is not None:
-            row["competitor_rating_sum"] += float(competitor.mds_overall_rating)
-            row["competitor_rating_count"] += 1
+    prepared = {
+        feature["properties"]["zipCode"]: prep(shape(feature["geometry"]))
+        for feature in spatial.feature_collection.get("features", [])
+        if feature.get("geometry") and feature.get("properties", {}).get("zipCode") in current_by_zip
+    }
+    _assign_competitors_to_zips(result.competitor_schools, current_by_zip, prepared)
 
+    trend = getattr(result, "trend", None)
     history_by_zip: dict[str, dict[int, dict[str, float]]] = defaultdict(dict)
     for zip_code in spatial.zip_codes:
-        weight = spatial.intersection_weights.get(zip_code, 0.0)
         row = current_by_zip[zip_code]
-        current_families = row["families_with_children"]
-        current_school_age = row["school_age_population"]
         base_income = _weighted_income(row, "median_household_income")
-        history_by_zip[zip_code] = {
-            2019: {
-                "families_with_children": current_families * 0.92,
-                "school_age_population": current_school_age * 0.93,
-                "seniors_65_plus": row["seniors_65_plus"] * 0.94,
-                "seniors_75_plus": row["seniors_75_plus"] * 0.93,
-                "total_households": row["total_households"] * 0.95,
-                "median_household_income_weighted_sum": base_income * max(row["total_population"] * 0.94, 1.0),
-                "median_household_income_weight": max(row["total_population"] * 0.94, 1.0),
-            },
-            2021: {
-                "families_with_children": current_families * 0.97,
-                "school_age_population": current_school_age * 0.98,
-                "seniors_65_plus": row["seniors_65_plus"] * 0.98,
-                "seniors_75_plus": row["seniors_75_plus"] * 0.98,
-                "total_households": row["total_households"] * 0.98,
-                "median_household_income_weighted_sum": base_income * max(row["total_population"] * 0.98, 1.0),
-                "median_household_income_weight": max(row["total_population"] * 0.98, 1.0),
-            },
-        }
+        households_history = _backcast_series(row["total_households"], getattr(trend, "families_pct", None), [2017, 2019])
+        population_history = _backcast_series(row["total_population"], getattr(trend, "school_age_pop_pct", None), [2017, 2019])
+        family_history = _backcast_series(row["families_with_children"], getattr(trend, "families_pct", None), [2017, 2019])
+        school_age_history = _backcast_series(row["school_age_population"], getattr(trend, "school_age_pop_pct", None), [2017, 2019])
+        income_history = _backcast_series(base_income, getattr(trend, "income_real_pct", None), [2017, 2019])
+        history_by_zip[zip_code] = {}
+        renter_ratio = row["renter_households"] / max(row["total_households"], 1.0)
+        burden_ratio = row["cost_burdened_renter_households"] / max(row["renter_households"], 1.0)
+        hud_ratio = row["hud_eligible_households"] / max(row["total_households"], 1.0)
+        for year in [2017, 2019]:
+            hist_households = households_history.get(year, row["total_households"])
+            hist_population = population_history.get(year, row["total_population"])
+            hist_renters = hist_households * renter_ratio
+            history_by_zip[zip_code][year] = {
+                "total_population": hist_population,
+                "total_households": hist_households,
+                "renter_households": hist_renters,
+                "cost_burdened_renter_households": hist_renters * burden_ratio,
+                "hud_eligible_households": hist_households * hud_ratio,
+                "families_with_children": family_history.get(year, row["families_with_children"]),
+                "school_age_population": school_age_history.get(year, row["school_age_population"]),
+                "seniors_65_plus": _backcast_series(row["seniors_65_plus"], None, [year]).get(year, row["seniors_65_plus"]),
+                "seniors_75_plus": _backcast_series(row["seniors_75_plus"], None, [year]).get(year, row["seniors_75_plus"]),
+                "median_household_income_weighted_sum": income_history.get(year, base_income) * max(hist_population, 1.0),
+                "median_household_income_weight": max(hist_population, 1.0),
+            }
     return current_by_zip, history_by_zip, 2022
 
 
@@ -853,7 +947,9 @@ def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
             distribution=_zip_distribution(base_distribution, max(row["total_households"] / max(float(result.demographics.total_households or 1), 1.0), 0.0), row["total_households"], row["total_households"] * 1.02),
         )
 
+    population_history = _history_metric(history_by_zip, zip_codes, "total_population")
     households_history = _history_metric(history_by_zip, zip_codes, "total_households")
+    renter_history = _history_metric(history_by_zip, zip_codes, "renter_households")
     current_burden_ratio = sum(row["cost_burdened_renter_households"] for row in current_by_zip.values()) / max(sum(row["total_households"] for row in current_by_zip.values()), 1.0)
     current_hud_ratio = sum(row["hud_eligible_households"] for row in current_by_zip.values()) / max(sum(row["total_households"] for row in current_by_zip.values()), 1.0)
     burden_history = {year: value * current_burden_ratio for year, value in households_history.items()}
@@ -899,6 +995,8 @@ def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
             DashboardSeriesDescriptor(key="medianHouseholdIncome", label="Median Household Income", color="#7c3aed", format="currency"),
         ],
         time_series={
+            "totalPopulation": _build_projection_series(population_history, data_year, float(sum(row["total_population"] for row in current_by_zip.values()))),
+            "renterHouseholds": _build_projection_series(renter_history, data_year, float(sum(row["renter_households"] for row in current_by_zip.values()))),
             "costBurdenedHouseholds": _build_projection_series(burden_history, data_year, float(result.demographics.cost_burdened_renter_households or 0)),
             "hudEligibleHouseholds": _build_projection_series(hud_history, data_year, float(result.demographics.hud_eligible_households or 0)),
             "medianHouseholdIncome": _build_projection_series(income_history, data_year, float(result.demographics.median_household_income or 0)),

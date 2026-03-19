@@ -747,3 +747,15 @@ async def ingest_historical(vintage: str = "2017", states: list[str] | None = No
             total += len(history_rows)
 
     return {"vintage": vintage, "total_records": total}
+
+
+async def ingest_all_historical_vintages(states: list[str] | None = None):
+    """Ingest the supported ACS 5-year historical vintages used by dashboard projections."""
+    vintages = ["2013", "2015", "2017", "2019", "2021"]
+    results = []
+    total_records = 0
+    for vintage in vintages:
+        result = await ingest_historical(vintage=vintage, states=states)
+        results.append(result)
+        total_records += int(result.get("total_records", 0))
+    return {"vintages": vintages, "results": results, "total_records": total_records}

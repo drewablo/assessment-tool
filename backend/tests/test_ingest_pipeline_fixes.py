@@ -1,7 +1,7 @@
 import asyncio
 import pandas as pd
 
-from pipeline import ingest_census, ingest_elder_care, ingest_schools
+from pipeline import ingest_census, ingest_elder_care, ingest_nais, ingest_schools
 
 
 def test_schools_transform_prefers_22_coordinates_and_falls_back(caplog):
@@ -147,3 +147,40 @@ def test_census_fetch_batches_and_merges_rows(monkeypatch, caplog):
     assert row["tract"] == "012300"
     assert all(row[f"VAR_{i:03d}"] == "1" for i in range(57))
 
+
+
+def test_ingest_all_historical_vintages_calls_supported_releases(monkeypatch):
+    calls = []
+
+    async def _fake_ingest(vintage: str = "2017", states=None):
+        calls.append((vintage, states))
+        return {"vintage": vintage, "total_records": 10}
+
+    monkeypatch.setattr(ingest_census, "ingest_historical", _fake_ingest)
+    result = asyncio.run(ingest_census.ingest_all_historical_vintages(states=["42"]))
+
+    assert [vintage for vintage, _ in calls] == ["2013", "2015", "2017", "2019", "2021"]
+    assert result["total_records"] == 50
+
+
+def test_nais_match_deduplicates_abington_friends_school():
+    pss_candidates = [
+        ingest_nais.MatchCandidate(
+            ppin="12345",
+            school_name="Abington Friends School",
+            state="PA",
+            zip_code="19046",
+            normalized_name=ingest_nais._normalize_name("Abington Friends School"),
+        )
+    ]
+    nais_row = {
+        "id": 38695,
+        "name": "Abington Friends School",
+        "state": "PA",
+        "zip": "19046-3242",
+    }
+
+    match = ingest_nais._find_pss_match(nais_row, pss_candidates)
+
+    assert match is not None
+    assert match.ppin == "12345"

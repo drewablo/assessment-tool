@@ -619,6 +619,7 @@ export interface AnalysisResponse {
   grade_level: "k5" | "k8" | "high_school" | "k12";
   demographics: DemographicData;
   competitor_schools: CompetitorSchool[];
+  housing_projects?: CompetitorSchool[] | null;
   catholic_school_count: number;
   total_private_school_count: number;
   feasibility_score: FeasibilityScore;
