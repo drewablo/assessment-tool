@@ -120,12 +120,12 @@ function ChoroplethMap({
 
   return (
     <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-6 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <h3 className="text-2xl font-semibold tracking-tight text-slate-950">{title}</h3>
+      <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-xl font-semibold tracking-tight text-slate-950">{title}</h3>
           {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
           <select
             value={metric.key}
             onChange={(event) => onMetricChange(event.target.value)}
@@ -144,11 +144,11 @@ function ChoroplethMap({
 
       <div ref={shellRef} className="space-y-4">
         {isEmpty ? (
-          <div className="flex h-[420px] w-full items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">
+          <div className="flex h-[480px] w-full items-center justify-center rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500">
             ZIP geometry is not available for this catchment yet. Populate the ZCTA cache and rerun the dashboard to render the choropleth.
           </div>
         ) : (
-          <div ref={mapRef} className="h-[420px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
+          <div ref={mapRef} className="h-[480px] w-full overflow-hidden rounded-[24px] border border-slate-100" />
         )}
         <div className="flex flex-wrap items-center justify-between gap-4 text-sm text-slate-500">
           <div className="flex items-center gap-3">

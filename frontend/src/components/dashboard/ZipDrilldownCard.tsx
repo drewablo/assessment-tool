@@ -66,8 +66,8 @@ function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
 
       {open ? (
         <div className="border-t border-slate-100 px-6 py-6">
-          <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div className="grid gap-4 md:grid-cols-3">
+          <div className="mb-6 flex flex-col gap-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {data.metrics.map((metric) => {
                 const badge = changeBadge(metric.current, metric.projected, metric.invertChange);
                 return (
@@ -94,10 +94,12 @@ function ZipDrilldownCard({ data, defaultOpen = false }: Props) {
                 );
               })}
             </div>
-            <ChartActionBar
-              onDownloadPng={() => downloadElementAsPng(`${data.zipCode}-drilldown.png`, ref.current)}
-              onDownloadCsv={() => downloadCsv(`${data.zipCode}-drilldown.csv`, csvRows)}
-            />
+            <div className="flex justify-end">
+              <ChartActionBar
+                onDownloadPng={() => downloadElementAsPng(`${data.zipCode}-drilldown.png`, ref.current)}
+                onDownloadCsv={() => downloadCsv(`${data.zipCode}-drilldown.csv`, csvRows)}
+              />
+            </div>
           </div>
 
           <div ref={ref} className="rounded-[24px] border border-slate-100 bg-white p-4">
