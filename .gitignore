@@ -19,6 +19,8 @@ node_modules/
 out/
 frontend/.env.local
 *.tsbuildinfo
+# Stray package-lock outside frontend/
+backend/package-lock.json
 
 # OS
 .DS_Store
