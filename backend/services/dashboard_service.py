@@ -343,11 +343,16 @@ def _build_projection_series(history: dict[int, float], current_year: int, curre
     return _series_from_points(envelope.points)
 
 
+def _safe_float(value: float) -> float:
+    """Clamp non-finite floats to 0 so JSON serialization never fails."""
+    return value if math.isfinite(value) else 0.0
+
+
 def _metric(label: str, current: float, projected: float, *, fmt: str = "number", invert_change: bool = False) -> DashboardDrilldownMetric:
     return DashboardDrilldownMetric(
         label=label,
-        current=round(float(current), 2),
-        projected=round(float(projected), 2),
+        current=round(_safe_float(current), 2),
+        projected=round(_safe_float(projected), 2),
         format=fmt,
         invert_change=invert_change,
     )
@@ -614,7 +619,8 @@ def _weighted_income(row: dict[str, float], prefix: str) -> float:
     weight = row.get(f"{prefix}_weight", 0.0)
     if weight <= 0:
         return 0.0
-    return row.get(f"{prefix}_weighted_sum", 0.0) / weight
+    raw = row.get(f"{prefix}_weighted_sum", 0.0) / weight
+    return _safe_float(raw)
 
 
 def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int]:
@@ -1014,6 +1020,15 @@ def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
     )
 
 
+def _sanitize_metric_maps(metric_maps: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    """Replace NaN/Infinity values in metric maps so JSON serialization is safe."""
+    for metric_key in metric_maps:
+        for zip_code, value in metric_maps[metric_key].items():
+            if not math.isfinite(value):
+                metric_maps[metric_key][zip_code] = 0.0
+    return metric_maps
+
+
 def _apply_metric_properties(spatial: DashboardSpatialContext, metric_maps: dict[str, dict[str, float]]) -> dict[str, Any]:
     feature_collection = json.loads(json.dumps(spatial.feature_collection))
     for feature in feature_collection.get("features", []):
@@ -1039,6 +1054,7 @@ async def build_dashboard_response(*, request: AnalysisRequest, result: Analysis
     else:
         module_data = _build_schools_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
 
+    _sanitize_metric_maps(module_data.metric_maps)
     feature_collection = _apply_metric_properties(spatial, module_data.metric_maps)
 
     freshness = result.data_freshness.model_dump() if result.data_freshness else None

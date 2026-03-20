@@ -355,7 +355,7 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
           >
             <p className="text-sm font-semibold">Assessment detail</p>
             <p className={`mt-1 text-xs ${primaryView === "assessment_detail" ? "text-slate-200" : "text-slate-500"}`}>
-              Overall scores, factor cards, legacy panels, exports, and supporting diagnostics.
+              Overall scores, factor cards, exports, and supporting diagnostics.
             </p>
           </button>
         </div>
