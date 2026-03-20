@@ -89,12 +89,94 @@ test("toDashboardModuleConfig keeps housing competitors on existing resources vi
 
   const config = toDashboardModuleConfig(payload as any, { ministry_type: "housing", market_context: "urban", housing_target_population: "all_ages" } as any, analysisResult);
 
-  assert.equal(config.competitors.length, 1);
+  assert.equal(config.competitors?.length, 1);
   assert.equal(config.sidebarViews?.existing_resources?.tableVariant, undefined);
-  assert.equal(shouldShowCompetitorTable("existing_resources", config.sidebarViews?.existing_resources?.tableVariant, config.competitors.length), true);
+  assert.equal(shouldShowCompetitorTable("existing_resources", config.sidebarViews?.existing_resources?.tableVariant, config.competitors?.length ?? 0), true);
 });
 
 test("dashboardCompetitors falls back to housing_projects when needed", () => {
   const competitors = dashboardCompetitors({ competitor_schools: undefined, housing_projects: [housingCompetitor] } as any);
   assert.equal(competitors.length, 1);
+});
+
+test("toDashboardModuleConfig builds schools config with trend data", () => {
+  const schoolsPayload = {
+    ...payload,
+    data: {
+      ...payload.data,
+      slug: "schools",
+      label: "Schools",
+      title: "School Market View",
+      time_series: {
+        familiesWithChildren: [
+          { year: 2020, value: 3000, projected: false, label: "Historical" },
+          { year: 2022, value: 3400, projected: false, label: "Historical" },
+          { year: 2029, value: 3800, projected: true, label: "Projected" },
+        ],
+        schoolAgePopulation: [
+          { year: 2020, value: 4000, projected: false, label: "Historical" },
+          { year: 2022, value: 4100, projected: false, label: "Historical" },
+          { year: 2029, value: 4400, projected: true, label: "Projected" },
+        ],
+      },
+    },
+  };
+
+  const config = toDashboardModuleConfig(
+    schoolsPayload as any,
+    { ministry_type: "schools", market_context: "suburban", gender: "coed", grade_level: "k12", weighting_profile: "standard_baseline" } as any,
+    null,
+  );
+
+  assert.equal(config.slug, "schools");
+  assert.equal(config.trendData.length, 3);
+  assert.equal(config.trendData[0].year, 2020);
+  assert.equal(config.trendData[2].projected, true);
+  assert.notEqual(config.distributionReferenceLine, undefined);
+});
+
+test("toDashboardModuleConfig builds elder-care config with sidebar views", () => {
+  const elderPayload = {
+    ...payload,
+    data: {
+      ...payload.data,
+      slug: "elder-care",
+      label: "Elder Care",
+      title: "Elder Care Market View",
+      sidebar_items: [
+        { key: "community_profile", title: "Community Profile", description: "desc", badge: "Core" },
+        { key: "partnership_viability", title: "Partnership Viability", description: "desc" },
+      ],
+    },
+  };
+
+  const analysisResult = {
+    ministry_type: "elder_care",
+    competitor_schools: [housingCompetitor],
+    catholic_school_count: 0,
+    total_private_school_count: 1,
+    radius_miles: 5,
+    demographics: {
+      seniors_65_plus: 5200,
+      seniors_75_plus: 2100,
+      seniors_living_alone: 1200,
+      seniors_projected_5yr: 5600,
+      seniors_projected_10yr: 6100,
+      total_population: 25000,
+      total_households: 9800,
+    },
+  } as any;
+
+  const config = toDashboardModuleConfig(elderPayload as any, { ministry_type: "elder_care", market_context: "suburban", care_level: "all" } as any, analysisResult);
+
+  assert.equal(config.slug, "elder-care");
+  assert.notEqual(config.sidebarViews, undefined);
+  assert.notEqual(config.sidebarViews?.partnership_viability, undefined);
+  assert.equal(config.sidebarViews?.partnership_viability?.tableVariant, "partner");
+});
+
+test("shouldShowCompetitorTable returns false for partner table variant", () => {
+  assert.equal(shouldShowCompetitorTable("partnership_viability", "partner", 5), false);
+  assert.equal(shouldShowCompetitorTable("competitors", undefined, 5), true);
+  assert.equal(shouldShowCompetitorTable("competitors", undefined, 0), false);
 });

@@ -428,6 +428,291 @@ def test_build_housing_payload_includes_population_and_renter_time_series():
     assert payload.time_series["renterHouseholds"][0].year <= data_year
 
 
+@pytest.mark.asyncio
+async def test_dashboard_response_for_elder_care_module(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+
+    request = AnalysisRequest(
+        school_name="St. Example",
+        address="123 Main St, Fort Myers, FL 33901",
+        ministry_type="elder_care",
+        mission_mode=True,
+        drive_minutes=20,
+        geography_mode="catchment",
+        gender="coed",
+        grade_level="k12",
+        weighting_profile="standard_baseline",
+        market_context="suburban",
+        care_level="all",
+    )
+    payload = await dashboard_service.build_dashboard_response(
+        request=request,
+        result=_response("elder_care"),
+        location={"matched_address": "123 Main St, Fort Myers, FL 33901"},
+    )
+
+    assert payload.data.slug == "elder-care"
+    assert payload.catchment.zip_codes == ["33901", "33916"]
+    assert "seniors65Plus" in payload.data.metric_maps
+    assert "seniors75Plus" in payload.data.metric_maps
+    assert "facilityCount" in payload.data.metric_maps
+    assert payload.data.time_series["seniors65Plus"]
+    assert payload.data.time_series["seniors75Plus"]
+    for zip_code in payload.catchment.zip_codes:
+        assert zip_code in payload.data.drilldowns
+
+
+@pytest.mark.asyncio
+async def test_dashboard_response_for_housing_module(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+
+    request = AnalysisRequest(
+        school_name="St. Example",
+        address="123 Main St, Fort Myers, FL 33901",
+        ministry_type="housing",
+        mission_mode=False,
+        drive_minutes=20,
+        geography_mode="catchment",
+        gender="coed",
+        grade_level="k12",
+        weighting_profile="standard_baseline",
+        market_context="suburban",
+        care_level="all",
+        housing_target_population="all_ages",
+    )
+    payload = await dashboard_service.build_dashboard_response(
+        request=request,
+        result=_response("housing"),
+        location={"matched_address": "123 Main St, Fort Myers, FL 33901"},
+    )
+
+    assert payload.data.slug == "housing"
+    assert payload.catchment.zip_codes == ["33901", "33916"]
+    assert "costBurdenedHouseholds" in payload.data.metric_maps
+    assert "renterHouseholds" in payload.data.metric_maps
+    assert "hudEligibleHouseholds" in payload.data.metric_maps
+    assert payload.data.time_series["totalPopulation"]
+    assert payload.data.time_series["renterHouseholds"]
+    assert payload.data.time_series["costBurdenedHouseholds"]
+    for zip_code in payload.catchment.zip_codes:
+        assert zip_code in payload.data.drilldowns
+
+
+def _write_per_zip_cache(cache_dir):
+    """Write test ZCTA data in the new per-ZIP directory format."""
+    import os
+    os.makedirs(cache_dir, exist_ok=True)
+
+    features = [
+        ("33901", {"type": "Polygon", "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]]}),
+        ("33916", {"type": "Polygon", "coordinates": [[[-81.88, 26.63], [-81.78, 26.63], [-81.78, 26.73], [-81.88, 26.73], [-81.88, 26.63]]]}),
+    ]
+
+    bbox_index = {}
+    for zip_code, geometry in features:
+        feature = {"type": "Feature", "properties": {"zipCode": zip_code, "name": zip_code}, "geometry": geometry}
+        with gzip.open(cache_dir / f"{zip_code}.json.gz", "wt", encoding="utf-8") as fh:
+            json.dump(feature, fh)
+        coords = geometry["coordinates"][0]
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
+        bbox_index[zip_code] = [min(xs), min(ys), max(xs), max(ys)]
+
+    with gzip.open(cache_dir / "bbox_index.json.gz", "wt", encoding="utf-8") as fh:
+        json.dump(bbox_index, fh)
+
+    (cache_dir / "_ready").touch()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_response_with_per_zip_directory_format(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "zcta"
+    _write_per_zip_cache(cache_dir)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_DIR", cache_dir)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+
+    request = AnalysisRequest(
+        school_name="St. Example",
+        address="123 Main St, Fort Myers, FL 33901",
+        ministry_type="schools",
+        mission_mode=False,
+        drive_minutes=20,
+        geography_mode="catchment",
+        gender="coed",
+        grade_level="k12",
+        weighting_profile="standard_baseline",
+        market_context="suburban",
+        care_level="all",
+    )
+    payload = await dashboard_service.build_dashboard_response(
+        request=request,
+        result=_response("schools"),
+        location={"matched_address": "123 Main St, Fort Myers, FL 33901"},
+    )
+
+    assert payload.metadata.geometry_source == "census_zcta_cache"
+    assert payload.catchment.zip_codes == ["33901", "33916"]
+    assert payload.catchment.geojson["features"][0]["properties"]["schoolAgePopulation"] > 0
+
+
+def test_sanitize_metric_maps_clamps_nan_and_infinity():
+    maps = {
+        "metric_a": {"33901": 100.0, "33916": float("nan")},
+        "metric_b": {"33901": float("inf"), "33916": 50.0},
+    }
+    sanitized = dashboard_service._sanitize_metric_maps(maps)
+    assert sanitized["metric_a"]["33901"] == 100.0
+    assert sanitized["metric_a"]["33916"] == 0.0
+    assert sanitized["metric_b"]["33901"] == 0.0
+    assert sanitized["metric_b"]["33916"] == 50.0
+
+
+def test_safe_float_clamps_non_finite():
+    assert dashboard_service._safe_float(42.0) == 42.0
+    assert dashboard_service._safe_float(float("nan")) == 0.0
+    assert dashboard_service._safe_float(float("inf")) == 0.0
+    assert dashboard_service._safe_float(float("-inf")) == 0.0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_endpoint_elder_care_via_api(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    async def _fake_geocode(_address: str):
+        return {
+            "lat": 26.6406, "lon": -81.8723,
+            "matched_address": "123 Main St, Fort Myers, FL 33901",
+            "county_fips": "12071", "state_fips": "12",
+            "county_name": "Lee County", "state_name": "Florida",
+        }
+
+    async def _fake_get_redis():
+        return None
+
+    async def _fake_run_analysis(_location, request, run_mode=None):
+        return _response(request.ministry_type), {"fallback_notes": []}
+
+    async def _fake_enrich(result, request):
+        return result
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+    monkeypatch.setattr(main, "geocode_address", _fake_geocode)
+    monkeypatch.setattr(main, "_get_redis", _fake_get_redis)
+    monkeypatch.setattr(main, "_run_analysis", _fake_run_analysis)
+    monkeypatch.setattr(main, "_enrich_analysis_result", _fake_enrich)
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/dashboard",
+        json={
+            "school_name": "St. Example",
+            "address": "123 Main St, Fort Myers, FL 33901",
+            "ministry_type": "elder_care",
+            "mission_mode": True,
+            "drive_minutes": 20,
+            "geography_mode": "catchment",
+            "gender": "coed",
+            "grade_level": "k12",
+            "weighting_profile": "standard_baseline",
+            "market_context": "suburban",
+            "care_level": "all",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["slug"] == "elder-care"
+    assert body["catchment"]["zip_codes"] == ["33901", "33916"]
+    assert body["data"]["metric_maps"]["seniors65Plus"]["33901"] > 0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_endpoint_housing_via_api(tmp_path, monkeypatch):
+    cache_path = tmp_path / "zcta.json.gz"
+    _write_zcta_cache(cache_path)
+    monkeypatch.setattr(dashboard_service, "ZCTA_CACHE_PATH", cache_path)
+    dashboard_service._load_zcta_cache.cache_clear()
+
+    async def _fake_db(*_args, **_kwargs):
+        return {}, {}, None
+
+    async def _fake_geocode(_address: str):
+        return {
+            "lat": 26.6406, "lon": -81.8723,
+            "matched_address": "123 Main St, Fort Myers, FL 33901",
+            "county_fips": "12071", "state_fips": "12",
+            "county_name": "Lee County", "state_name": "Florida",
+        }
+
+    async def _fake_get_redis():
+        return None
+
+    async def _fake_run_analysis(_location, request, run_mode=None):
+        return _response(request.ministry_type), {"fallback_notes": []}
+
+    async def _fake_enrich(result, request):
+        return result
+
+    monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
+    monkeypatch.setattr(main, "geocode_address", _fake_geocode)
+    monkeypatch.setattr(main, "_get_redis", _fake_get_redis)
+    monkeypatch.setattr(main, "_run_analysis", _fake_run_analysis)
+    monkeypatch.setattr(main, "_enrich_analysis_result", _fake_enrich)
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/dashboard",
+        json={
+            "school_name": "St. Example",
+            "address": "123 Main St, Fort Myers, FL 33901",
+            "ministry_type": "housing",
+            "mission_mode": False,
+            "drive_minutes": 20,
+            "geography_mode": "catchment",
+            "gender": "coed",
+            "grade_level": "k12",
+            "weighting_profile": "standard_baseline",
+            "market_context": "suburban",
+            "care_level": "all",
+            "housing_target_population": "all_ages",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["slug"] == "housing"
+    assert body["catchment"]["zip_codes"] == ["33901", "33916"]
+    assert body["data"]["metric_maps"]["costBurdenedHouseholds"]["33901"] > 0
+    assert body["data"]["metric_maps"]["renterHouseholds"]["33901"] > 0
+
+
 def test_area_weighted_fallback_uses_demographic_trend_for_history_backcast():
     result = _response("schools")
     result.trend = DemographicTrend(school_age_pop_pct=20.0, income_real_pct=10.0, families_pct=15.0)

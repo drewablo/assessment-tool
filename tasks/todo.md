@@ -106,3 +106,21 @@
 - Added `backend/docs/deferred_dashboard_data_readiness.md` to track the requested HUD QCT/DDA, ACS B19037, CMS ownership/operator, and ACS B25003 readiness tasks with current status and next actions.
 - Verified the Wave 3 starter with the frontend test suite and a TypeScript no-emit check.
 
+## Plan — Legacy dashboard migration hardening
+- [x] Add dashboard service tests for elder_care and housing modules (previously only schools was covered).
+- [x] Add dashboard endpoint integration tests for elder_care and housing via the `/api/dashboard` API.
+- [x] Add test coverage for the per-ZIP directory cache format (new `ZCTA_CACHE_DIR` layout).
+- [x] Harden dashboard service against NaN/Infinity metric values with `_safe_float` and `_sanitize_metric_maps`.
+- [x] Add frontend tests for schools config generation, elder-care sidebar views, and competitor table visibility.
+- [x] Fix TypeScript strict-mode errors in frontend test file.
+- [x] Clean up assessment-detail toggle copy (remove "legacy panels" phrasing).
+- [x] Run all backend and frontend tests and TypeScript no-emit check.
+
+## Review notes — Legacy dashboard migration hardening
+- Expanded backend test coverage from 9 to 16 tests. New tests cover elder-care module payload, housing module payload, per-ZIP directory format, NaN/Infinity sanitization, and API endpoint integration for all three ministry types.
+- Added `_safe_float()` helper to clamp NaN/Infinity values before JSON serialization in drilldown metrics and weighted income calculations.
+- Added `_sanitize_metric_maps()` to clean all metric maps before they are written onto GeoJSON feature properties.
+- Expanded frontend test suite from 2 to 5 tests: schools config with trend data, elder-care sidebar views with partner table variant, and `shouldShowCompetitorTable` edge cases.
+- Fixed TypeScript strict errors in the existing test file (`competitors` possibly undefined).
+- Removed "legacy panels" wording from the assessment-detail toggle button.
+
