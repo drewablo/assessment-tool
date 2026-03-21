@@ -155,6 +155,7 @@ cmd_prod() {
   info "  ./start.sh logs --prod     Tail all logs"
   info "  ./start.sh stop --prod     Stop all services"
   info "  ./start.sh update          Pull latest + rebuild"
+  info "  ./start.sh ingest --pipeline census-history --prod  # load dashboard ACS history"
 }
 
 # ---------------------------------------------------------------------------
@@ -412,12 +413,13 @@ cmd_ingest() {
   case "$PIPELINE" in
     all) CLI_CMD=(python -m pipeline.cli ingest-all --vintage "$VINTAGE") ;;
     census) CLI_CMD=(python -m pipeline.cli ingest-census --vintage "$VINTAGE") ;;
+    census-history) CLI_CMD=(python -m pipeline.cli ingest-census-history) ;;
     schools) CLI_CMD=(python -m pipeline.cli ingest-schools) ;;
     elder-care) CLI_CMD=(python -m pipeline.cli ingest-elder-care) ;;
     housing) CLI_CMD=(python -m pipeline.cli ingest-housing) ;;
     section-202) CLI_CMD=(python -m pipeline.cli ingest-hud-section202) ;;
     status) CLI_CMD=(python -m pipeline.cli status) ;;
-    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|schools|elder-care|housing|section-202|status" ;;
+    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|census-history|schools|elder-care|housing|section-202|status" ;;
   esac
 
   if [[ "$PIPELINE" == "all" || "$PIPELINE" == "census" ]] && [[ -n "$STATES" ]]; then
@@ -473,6 +475,7 @@ cmd_help() {
     ./start.sh doctor --prod             # API-level DB readiness checks
     ./start.sh doctor [--prod]           # bracket form also accepted
     ./start.sh ingest --prod             # ingest all datasets into DB
+    ./start.sh ingest --pipeline census-history --prod  # ingest dashboard ACS history
     ./start.sh ingest --pipeline section-202 --prod  # ingest Section 202 only
 
 USAGE

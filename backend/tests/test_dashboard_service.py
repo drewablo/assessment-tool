@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from shapely.geometry import shape
+from shapely.geometry import box, shape
 from shapely.prepared import prep
 
 import main
@@ -388,6 +388,132 @@ def test_assign_competitors_to_zips_uses_point_in_polygon_when_zip_missing():
 
     assert current_by_zip["33901"]["competitor_count"] == 1
     assert current_by_zip["33901"]["competitor_units"] == 120
+
+
+def test_backcast_series_uses_dashboard_year():
+    target_years = [2017, 2019]
+
+    series = dashboard_service._backcast_series(1000.0, 5.0, target_years)
+    explicit_dashboard_year = dashboard_service._backcast_series(1000.0, 5.0, target_years, current_year=dashboard_service.DASHBOARD_DATA_YEAR)
+    legacy_anchor = dashboard_service._backcast_series(1000.0, 5.0, target_years, current_year=2022)
+
+    assert series == explicit_dashboard_year
+    assert series != legacy_anchor
+    assert series[2019] < legacy_anchor[2019]
+
+
+def test_backcast_series_none_pct_returns_flat(caplog):
+    with caplog.at_level("WARNING"):
+        series = dashboard_service._backcast_series(1000.0, None, dashboard_service.DASHBOARD_HISTORICAL_YEARS)
+
+    assert series == {year: 1000.0 for year in dashboard_service.DASHBOARD_HISTORICAL_YEARS}
+    assert "no trend data available" in caplog.text
+
+
+def test_projection_with_real_history_has_non_zero_slope():
+    series = dashboard_service._build_projection_series(
+        {2013: 820.0, 2015: 900.0, 2017: 980.0, 2019: 1090.0, 2021: 1150.0},
+        dashboard_service.DASHBOARD_DATA_YEAR,
+        1200.0,
+    )
+
+    current_point = next(point for point in series if point.year == dashboard_service.DASHBOARD_DATA_YEAR)
+    projected_point = next(point for point in series if point.year == dashboard_service._projection_years()[-1])
+
+    assert projected_point.value > current_point.value
+
+
+def test_fallback_data_year():
+    result = _response("schools")
+    spatial = dashboard_service.DashboardSpatialContext(
+        zip_codes=["33901"],
+        feature_collection={
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "properties": {"zipCode": "33901"}, "geometry": {"type": "Polygon", "coordinates": [[[-81.95, 26.60], [-81.82, 26.60], [-81.82, 26.69], [-81.95, 26.69], [-81.95, 26.60]]]}}
+            ],
+        },
+        geometry_source="test",
+        selection_method="test",
+        catchment_geometry=None,
+        intersection_weights={"33901": 1.0},
+    )
+
+    _, history_by_zip, data_year = dashboard_service._area_weighted_fallback(result, spatial)
+
+    assert data_year == dashboard_service.DASHBOARD_DATA_YEAR
+    assert sorted(history_by_zip["33901"]) == dashboard_service.DASHBOARD_HISTORICAL_YEARS
+
+
+def test_select_zcta_records_returns_more_than_24(monkeypatch):
+    count = 40
+    index = {}
+    features = {}
+    for i in range(count):
+        zip_code = f"{10000 + i}"
+        geom = box(i, 0, i + 0.8, 1.0)
+        index[zip_code] = dashboard_service.ZctaBboxEntry(zip_code=zip_code, bounds=geom.bounds)
+        features[zip_code] = {
+            "type": "Feature",
+            "properties": {"zipCode": zip_code, "name": zip_code},
+            "geometry": geom.__geo_interface__,
+        }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (box(-1, -1, count + 1, 2), "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert len(spatial.zip_codes) == count
+    assert len(spatial.feature_collection["features"]) == count
+
+
+def test_zip_weight_favors_fully_covered(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    small_zip = box(0.0, 0.0, 0.5, 0.5)
+    large_zip = box(0.0, 0.0, 5.0, 5.0)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=small_zip.bounds),
+        "22222": dashboard_service.ZctaBboxEntry(zip_code="22222", bounds=large_zip.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": small_zip.__geo_interface__},
+        "22222": {"type": "Feature", "properties": {"zipCode": "22222", "name": "22222"}, "geometry": large_zip.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert spatial.intersection_weights["11111"] > spatial.intersection_weights["22222"]
+
+
+def test_minimum_coverage_filter(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    included_zip = box(0.0, 0.0, 0.5, 0.5)
+    clipped_zip = box(0.0, 0.0, 100.0, 100.0)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=included_zip.bounds),
+        "22222": dashboard_service.ZctaBboxEntry(zip_code="22222", bounds=clipped_zip.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": included_zip.__geo_interface__},
+        "22222": {"type": "Feature", "properties": {"zipCode": "22222", "name": "22222"}, "geometry": clipped_zip.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert spatial.zip_codes == ["11111"]
+    assert "22222" not in spatial.intersection_weights
 
 
 def test_build_projection_series_projects_non_flat_growth_with_multi_point_history():
