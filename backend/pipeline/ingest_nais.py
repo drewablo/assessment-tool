@@ -28,7 +28,7 @@ from pipeline.celery_app import celery_app
 from pipeline.ingest_schools import _classify_tier
 
 logger = logging.getLogger("pipeline.nais")
-NAIS_CSV_PATH = Path(__file__).resolve().parents[2] / "exsources" / "nais_schools.csv"
+NAIS_CSV_PATH = Path(__file__).resolve().parents[1] / "exsources" / "nais_schools.csv"
 _COMMON_SUFFIXES = {
     "school", "academy", "the", "of", "and", "inc", "campus", "prep", "preparatory"
 }
@@ -199,6 +199,9 @@ def ingest_nais_data(self):
 
 async def _ingest_nais_async(csv_path: Path | None = None) -> dict[str, int]:
     csv_file = csv_path or NAIS_CSV_PATH
+    if not csv_file.exists():
+        logger.warning("NAIS CSV not found at %s — skipping NAIS ingest", csv_file)
+        return {"inserted": 0, "matched_to_pss": 0, "geocode_failures": 0, "skipped": 0}
     df = pd.read_csv(csv_file)
 
     async with async_session_factory() as session:

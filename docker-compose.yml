@@ -66,6 +66,8 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
+    volumes:
+      - ./exsources:/app/exsources:ro
     environment:
       DATABASE_URL: postgresql+asyncpg://feasibility:feasibility@db:5432/feasibility
       REDIS_URL: redis://redis:6379/0
