@@ -19,9 +19,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
-COMPOSE_DEV="docker-compose.yml"
-COMPOSE_PROD="docker-compose.prod.yml"
-ENV_PROD=".env.prod"
+COMPOSE_DEV="$ROOT_DIR/docker-compose.yml"
+COMPOSE_PROD="$ROOT_DIR/docker-compose.prod.yml"
+ENV_PROD="$ROOT_DIR/.env.prod"
 
 CMD="${1:-dev}"
 
@@ -425,6 +425,9 @@ cmd_ingest() {
   fi
 
   step "Running ingestion in api container (pipeline=$PIPELINE)"
+  if ! "${COMPOSE_CMD[@]}" ps --status running api 2>/dev/null | grep -q api; then
+    die "The 'api' container is not running. Start the stack first:\n  ./start.sh prod        (first-time setup)\n  ./start.sh prod        (if stopped)"
+  fi
   "${COMPOSE_CMD[@]}" exec -T api "${CLI_CMD[@]}"
 
   step "Post-ingest readiness check"
