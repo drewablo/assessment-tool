@@ -728,21 +728,24 @@ async def ingest_historical(vintage: str = "2017", states: list[str] | None = No
                 "total_households": transformed["total_households"],
             })
 
+        _HISTORY_BATCH = 500
         async with async_session_factory() as session:
-            stmt = pg_insert(CensusTractHistory).values(history_rows)
-            stmt = stmt.on_conflict_do_update(
-                constraint="ix_history_geoid_vintage",
-                set_={
-                    "total_population": stmt.excluded.total_population,
-                    "population_5_17": stmt.excluded.population_5_17,
-                    "median_household_income": stmt.excluded.median_household_income,
-                    "families_with_own_children": stmt.excluded.families_with_own_children,
-                    "population_65_74": stmt.excluded.population_65_74,
-                    "population_75_plus": stmt.excluded.population_75_plus,
-                    "total_households": stmt.excluded.total_households,
-                },
-            )
-            await session.execute(stmt)
+            for chunk_start in range(0, len(history_rows), _HISTORY_BATCH):
+                chunk = history_rows[chunk_start : chunk_start + _HISTORY_BATCH]
+                stmt = pg_insert(CensusTractHistory).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="ix_history_geoid_vintage",
+                    set_={
+                        "total_population": stmt.excluded.total_population,
+                        "population_5_17": stmt.excluded.population_5_17,
+                        "median_household_income": stmt.excluded.median_household_income,
+                        "families_with_own_children": stmt.excluded.families_with_own_children,
+                        "population_65_74": stmt.excluded.population_65_74,
+                        "population_75_plus": stmt.excluded.population_75_plus,
+                        "total_households": stmt.excluded.total_households,
+                    },
+                )
+                await session.execute(stmt)
             await session.commit()
             total += len(history_rows)
 
