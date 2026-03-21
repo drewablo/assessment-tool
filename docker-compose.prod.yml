@@ -4,6 +4,7 @@
 services:
   db:
     image: postgis/postgis:16-3.4
+    platform: linux/amd64
     restart: unless-stopped
     environment:
       POSTGRES_DB: feasibility
@@ -45,8 +46,8 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 20s
+      retries: 15
+      start_period: 60s
     depends_on:
       db:
         condition: service_healthy
