@@ -79,6 +79,31 @@ async def init_db():
             "ALTER TABLE IF EXISTS competitors_schools "
             "ADD COLUMN IF NOT EXISTS nais_id VARCHAR(30)"
         ))
+        # ix_history_geoid_vintage was originally a plain UNIQUE INDEX, but
+        # ON CONFLICT ON CONSTRAINT requires a UNIQUE CONSTRAINT.  Drop the
+        # orphaned index (if it exists without a backing constraint) then add
+        # the proper constraint so both fresh and existing DBs converge.
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_indexes
+                    WHERE tablename = 'census_tracts_history'
+                      AND indexname  = 'ix_history_geoid_vintage'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'ix_history_geoid_vintage'
+                ) THEN
+                    DROP INDEX ix_history_geoid_vintage;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'ix_history_geoid_vintage'
+                ) THEN
+                    ALTER TABLE census_tracts_history
+                    ADD CONSTRAINT ix_history_geoid_vintage UNIQUE (geoid, acs_vintage);
+                END IF;
+            END $$
+        """))
 
 
 async def close_db():
