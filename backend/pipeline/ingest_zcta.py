@@ -85,7 +85,8 @@ async def ingest_zcta_boundaries(*, source_url: str = ZCTA_SOURCE_URL, zip_filte
         )
 
         # Write individual per-ZIP files (~3-15KB each) + a bbox index (~200KB)
-        destination.mkdir(parents=True, exist_ok=True)
+        # Use os.makedirs to avoid pathlib mkdir issues on Docker bind mounts
+        os.makedirs(destination, exist_ok=True)
         count = 0
         bbox_index: dict[str, list[float]] = {}
 
