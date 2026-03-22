@@ -273,6 +273,15 @@ export interface CompetitorSchool {
   reac_inspection_score?: number | null;
 }
 
+export interface DemographicHistoryPoint {
+  year: number;
+  school_age_population: number | null;
+  total_population: number | null;
+  median_household_income: number | null;
+  families_with_children: number | null;
+  total_households: number | null;
+}
+
 export interface DemographicTrend {
   school_age_pop_pct: number | null;
   income_real_pct: number | null;
@@ -628,6 +637,7 @@ export interface AnalysisResponse {
   decision_pathway?: DecisionPathwayRecommendation | null;
   data_notes: string[];
   trend: DemographicTrend | null;
+  history_series: DemographicHistoryPoint[];
   population_gravity: PopulationGravityMap | null;
   trace_id?: string | null;
   data_freshness?: DataFreshnessMetadata | null;

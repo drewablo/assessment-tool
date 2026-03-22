@@ -56,6 +56,7 @@ from models.schemas import (
     AnalysisResponse,
     BenchmarkPercentiles,
     DemographicData,
+    DemographicHistoryPoint,
     DemographicTrend,
     EnrollmentForecast,
     ForecastPoint,
@@ -2023,6 +2024,10 @@ async def calculate_feasibility(
         recommendation_detail=recommendation_detail,
         data_notes=data_notes,
         trend=trend,
+        history_series=[
+            DemographicHistoryPoint(**pt)
+            for pt in (demographics.get("history_series") or [])
+        ],
         population_gravity=gravity_map,
         enrollment_forecast=enrollment_forecast,
     )

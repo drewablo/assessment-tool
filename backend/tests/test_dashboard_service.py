@@ -472,7 +472,7 @@ def test_select_zcta_records_returns_more_than_24(monkeypatch):
 def test_zip_weight_favors_fully_covered(monkeypatch):
     catchment = box(0, 0, 1, 1)
     small_zip = box(0.0, 0.0, 0.5, 0.5)
-    large_zip = box(0.0, 0.0, 5.0, 5.0)
+    large_zip = box(0.0, 0.0, 4.0, 4.0)
 
     index = {
         "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=small_zip.bounds),
@@ -514,6 +514,130 @@ def test_minimum_coverage_filter(monkeypatch):
 
     assert spatial.zip_codes == ["11111"]
     assert "22222" not in spatial.intersection_weights
+
+
+def test_coverage_filter_removes_slivers(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    sliver_zip = box(0, 0, 7, 7)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=sliver_zip.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": sliver_zip.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert spatial.zip_codes == []
+
+
+def test_coverage_filter_keeps_substantial_overlap(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    half_inside_zip = box(0, 0, 2, 1)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=half_inside_zip.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": half_inside_zip.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert spatial.zip_codes == ["11111"]
+
+
+def test_sort_by_coverage_not_area(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    fully_covered_zip = box(0, 0, 0.5, 0.5)
+    large_low_coverage_zip = box(0, 0, 4, 4)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=fully_covered_zip.bounds),
+        "22222": dashboard_service.ZctaBboxEntry(zip_code="22222", bounds=large_low_coverage_zip.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": fully_covered_zip.__geo_interface__},
+        "22222": {"type": "Feature", "properties": {"zipCode": "22222", "name": "22222"}, "geometry": large_low_coverage_zip.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert spatial.zip_codes == ["11111", "22222"]
+
+
+def test_max_zips_75(monkeypatch):
+    count = 60
+    index = {}
+    features = {}
+    for i in range(count):
+        zip_code = f"{10000 + i}"
+        geom = box(i, 0, i + 0.8, 1.0)
+        index[zip_code] = dashboard_service.ZctaBboxEntry(zip_code=zip_code, bounds=geom.bounds)
+        features[zip_code] = {
+            "type": "Feature",
+            "properties": {"zipCode": zip_code, "name": zip_code},
+            "geometry": geom.__geo_interface__,
+        }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (box(-1, -1, count + 1, 2), "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert len(spatial.zip_codes) == count
+    assert len(spatial.feature_collection["features"]) == count
+
+
+def test_weights_sum_to_one(monkeypatch):
+    catchment = box(0, 0, 1, 1)
+    zip_a = box(0, 0, 0.5, 1.0)
+    zip_b = box(0.5, 0, 1.0, 1.0)
+
+    index = {
+        "11111": dashboard_service.ZctaBboxEntry(zip_code="11111", bounds=zip_a.bounds),
+        "22222": dashboard_service.ZctaBboxEntry(zip_code="22222", bounds=zip_b.bounds),
+    }
+    features = {
+        "11111": {"type": "Feature", "properties": {"zipCode": "11111", "name": "11111"}, "geometry": zip_a.__geo_interface__},
+        "22222": {"type": "Feature", "properties": {"zipCode": "22222", "name": "22222"}, "geometry": zip_b.__geo_interface__},
+    }
+
+    monkeypatch.setattr(dashboard_service, "_load_zcta_bbox_index", lambda: index)
+    monkeypatch.setattr(dashboard_service, "_load_features_for_zips", lambda _zip_codes: features)
+    monkeypatch.setattr(dashboard_service, "_catchment_geometry", lambda _result: (catchment, "test"))
+
+    spatial = dashboard_service._select_zcta_records(_response("schools"))
+
+    assert sum(spatial.intersection_weights.values()) == pytest.approx(1.0)
+
+
+def test_fallback_buffer_is_elliptical():
+    result = _response("schools").model_copy(
+        update={"lat": 40.0, "lon": -75.0, "isochrone_polygon": None, "radius_miles": 10.0}
+    )
+
+    geom, selection_method = dashboard_service._catchment_geometry(result)
+    minx, miny, maxx, maxy = geom.bounds
+    lat_delta, lon_delta = dashboard_service._approx_radius_degrees(result.lat, result.radius_miles)
+
+    assert selection_method == "radius_intersection"
+    assert (maxy - miny) / 2 == pytest.approx(lat_delta, rel=1e-3)
+    assert (maxx - minx) / 2 == pytest.approx(lon_delta, rel=1e-3)
 
 
 def test_build_projection_series_projects_non_flat_growth_with_multi_point_history():

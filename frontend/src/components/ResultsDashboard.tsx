@@ -10,6 +10,7 @@ import ElderCareGravityPanel from "./ElderCareGravityPanel";
 import HousingGravityPanel from "./HousingGravityPanel";
 import CompetitorTable from "./CompetitorTable";
 import TrendPanel from "./TrendPanel";
+import DemographicHistoryChart from "./DemographicHistoryChart";
 import BenchmarkPanel from "./BenchmarkPanel";
 import HierarchicalScorePanel from "./HierarchicalScorePanel";
 import { Download, FileText, AlertCircle, RefreshCw, CheckCircle2, XCircle, Network } from "lucide-react";
@@ -463,9 +464,22 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
             <HousingGravityPanel gravity={result.population_gravity} />
           )}
 
-          {/* Demographic trend */}
+          {/* Demographic trend snapshot */}
           {result.ministry_type === "schools" && result.trend && result.trend.trend_label !== "Unknown" && (
             <TrendPanel trend={result.trend} />
+          )}
+
+          {/* Multi-vintage historical chart — renders when ingested history exists */}
+          {result.history_series && result.history_series.length >= 2 && (
+            <DemographicHistoryChart
+              series={result.history_series}
+              current={{
+                school_age_population: result.demographics.school_age_population,
+                total_population: result.demographics.total_population,
+                median_household_income: result.demographics.median_household_income,
+                families_with_children: result.demographics.families_with_children,
+              }}
+            />
           )}
 
           {/* Competitor schools */}
