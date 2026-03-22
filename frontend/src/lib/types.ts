@@ -246,6 +246,8 @@ export interface DemographicData {
   market_depth_ratio?: number | null;
   elder_care_weighted_competitor_beds?: number | null;
   elder_care_bed_saturation_ratio?: number | null;
+  renter_households?: number | null;
+  cost_burdened_renter_households?: number | null;
 }
 
 export interface CompetitorSchool {
