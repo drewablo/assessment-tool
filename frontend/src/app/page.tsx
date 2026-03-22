@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AnalysisForm from "@/components/AnalysisForm";
 import ResultsDashboard from "@/components/ResultsDashboard";
 import LoadingSkeleton from "@/components/LoadingSkeleton";
@@ -19,6 +19,22 @@ const STORAGE_KEY = "ministry_saved_analyses";
 const DB_ENABLED = (process.env.NEXT_PUBLIC_USE_DB || "").toLowerCase() === "true";
 const PREFILL_ANALYSIS_KEY = "intelligence_prefill_analysis";
 
+function buildDefaultRequest(): AnalysisRequest {
+  return {
+    school_name: "",
+    address: "",
+    ministry_type: "schools",
+    mission_mode: false,
+    drive_minutes: 20,
+    geography_mode: "catchment",
+    gender: "coed",
+    grade_level: "k12",
+    weighting_profile: "standard_baseline",
+    market_context: "suburban",
+    care_level: "all",
+  };
+}
+
 export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +43,8 @@ export default function HomePage() {
   const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>([]);
   const [draftRequest, setDraftRequest] = useState<AnalysisRequest | null>(null);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const lastRequestRef = useRef<AnalysisRequest | null>(null);
+  const lastResultRef = useRef<AnalysisResponse | null>(null);
 
   useEffect(() => {
     try {
@@ -42,19 +60,7 @@ export default function HomePage() {
       if (prefillRaw) {
         const prefill = JSON.parse(prefillRaw) as Partial<AnalysisRequest>;
         setDraftRequest((prev) => ({
-          ...(prev ?? {
-            school_name: "",
-            address: "",
-            ministry_type: "schools",
-            mission_mode: false,
-            drive_minutes: 20,
-            geography_mode: "catchment",
-            gender: "coed",
-            grade_level: "k12",
-            weighting_profile: "standard_baseline",
-            market_context: "suburban",
-            care_level: "all",
-          }),
+          ...(prev ?? buildDefaultRequest()),
           ...prefill,
         } as AnalysisRequest));
         window.localStorage.removeItem(PREFILL_ANALYSIS_KEY);
@@ -62,6 +68,47 @@ export default function HomePage() {
     } catch {
       // Ignore invalid local cache
     }
+  }, []);
+
+  useEffect(() => {
+    lastRequestRef.current = lastRequest;
+  }, [lastRequest]);
+
+  useEffect(() => {
+    lastResultRef.current = result;
+  }, [result]);
+
+  useEffect(() => {
+    const currentState = window.history.state;
+    if (!currentState || currentState.view !== "results") {
+      window.history.replaceState({ view: "form" }, "", "/");
+    }
+
+    function handlePopState(event: PopStateEvent) {
+      const state = event.state as { view?: string; request?: AnalysisRequest; result?: AnalysisResponse } | null;
+
+      if (state?.view === "results") {
+        const nextRequest = state.request ?? lastRequestRef.current;
+        const nextResult = state.result ?? lastResultRef.current;
+        if (nextRequest) {
+          setLastRequest(nextRequest);
+          setDraftRequest({ ...nextRequest });
+        }
+        setError(null);
+        setResult(nextResult ?? null);
+        return;
+      }
+
+      setResult(null);
+      setError(null);
+      const fallbackRequest = state?.request ?? lastRequestRef.current;
+      if (fallbackRequest) {
+        setDraftRequest({ ...fallbackRequest });
+      }
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   function persistSaved(next: SavedAnalysis[]) {
@@ -110,6 +157,8 @@ export default function HomePage() {
     try {
       const data = await runAnalysis(req);
       setResult(data);
+      setDraftRequest({ ...req });
+      window.history.pushState({ view: "results", request: req, result: data }, "", "/?view=results");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analysis failed. Please try again.");
     } finally {
@@ -118,9 +167,20 @@ export default function HomePage() {
   }
 
   function handleReset() {
+    const requestToRestore = lastRequestRef.current;
+
     setResult(null);
     setError(null);
-    setLastRequest(null);
+    if (requestToRestore) {
+      setDraftRequest({ ...requestToRestore });
+    }
+
+    if (window.history.state?.view === "results") {
+      window.history.back();
+      return;
+    }
+
+    window.history.replaceState({ view: "form", request: requestToRestore ?? undefined }, "", "/");
   }
 
   return (
@@ -176,19 +236,7 @@ export default function HomePage() {
               <HistoryPanel
                 onRestore={(req) => {
                   setDraftRequest((prev) => ({
-                    ...(prev ?? {
-                      school_name: "",
-                      address: "",
-                      ministry_type: "schools",
-                      mission_mode: false,
-                      drive_minutes: 20,
-                      geography_mode: "catchment",
-                      gender: "coed",
-                      grade_level: "k12",
-                      weighting_profile: "standard_baseline",
-                      market_context: "suburban",
-                      care_level: "all",
-                    }),
+                    ...(prev ?? buildDefaultRequest()),
                     ...req,
                   } as AnalysisRequest));
                 }}

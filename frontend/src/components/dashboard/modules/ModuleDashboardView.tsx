@@ -26,11 +26,63 @@ interface Props {
   backLabel?: string;
 }
 
+const TREND_TABS = new Set([
+  "summary",
+  "projections",
+  "population_trend",
+  "market_size",
+  "median_income",
+  "change_average",
+  "cohort_breakdown",
+  "age_cohorts",
+  "renter_owner",
+  "age_distribution",
+  "poverty_rate",
+  "care_implications",
+]);
+
+const MAP_TABS = new Set([
+  "summary",
+  "map_view",
+  "median_income",
+  "high_income",
+  "market_size",
+  "competitor_overlap",
+  "service_map",
+  "subsidized_map",
+  "competitor_map",
+]);
+
+const DRILLDOWN_TABS = new Set([
+  "summary",
+  "map_view",
+  "drilldown",
+  "median_income",
+  "high_income",
+  "market_size",
+  "competitor_overlap",
+  "service_map",
+  "subsidized_map",
+  "competitor_map",
+]);
+
+const DISTRIBUTION_TABS = new Set([
+  "summary",
+  "distribution",
+  "catholic_affiliation",
+  "supply_gap",
+  "poverty_rate",
+  "care_implications",
+]);
+
+const COMPETITOR_TABLE_TABS = new Set(["competitor_overlap", "competitor_table", "project_table"]);
+const PARTNER_TABLE_TABS = new Set(["potential_partners"]);
+
 export default function ModuleDashboardView({ config, embedded = false, backHref, backLabel }: Props) {
   const [activeSidebar, setActiveSidebar] = useState(config.sidebarItems[0]?.key ?? "");
   const [activeTab, setActiveTab] = useState(config.tabs[0]?.key ?? "");
   const [metricKey, setMetricKey] = useState(config.metricOptions[0]?.key ?? "");
-  const [selectedZip, setSelectedZip] = useState(Object.keys(config.zipDrilldowns)[0] ?? "");
+  const [selectedZip, setSelectedZip] = useState("");
   const drilldownRef = useRef<HTMLDivElement>(null);
 
   const activeView = config.sidebarViews?.[activeSidebar];
@@ -46,9 +98,12 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
   const currentDistributionTitle = activeTabView?.distributionTitle ?? activeView?.distributionTitle ?? config.distributionTitle;
   const currentDistributionSubtitle = activeTabView?.distributionSubtitle ?? activeView?.distributionSubtitle ?? config.distributionSubtitle;
   const currentDistributionData = activeTabView?.distributionData ?? activeView?.distributionData ?? config.distributionData;
-  const currentDistributionPrimaryLabel = activeTabView?.distributionPrimaryLabel ?? activeView?.distributionPrimaryLabel ?? "2024";
-  const currentDistributionComparisonLabel = activeView?.distributionComparisonLabel ?? "2029";
-  const currentDistributionReferenceLine = activeView?.distributionReferenceLine ?? config.distributionReferenceLine;
+  const currentDistributionPrimaryLabel =
+    activeTabView?.distributionPrimaryLabel ?? activeView?.distributionPrimaryLabel ?? "2024";
+  const currentDistributionComparisonLabel =
+    activeTabView?.distributionComparisonLabel ?? activeView?.distributionComparisonLabel ?? "2029";
+  const currentDistributionReferenceLine =
+    activeView?.distributionReferenceLine ?? config.distributionReferenceLine;
   const currentCallout = activeView?.callout;
 
   useEffect(() => {
@@ -66,35 +121,78 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
   }, [currentMetricOptions, metricKey]);
 
   useEffect(() => {
-    const zipKeys = Object.keys(currentZipDrilldowns);
-    if (zipKeys.length === 0) return;
-    if (!selectedZip) {
-      setSelectedZip(zipKeys[0]);
+    const tabMetricMap: Record<string, string> = {
+      competitor_map: "competitorCount",
+      competitor_overlap: "competitorCount",
+      high_income: "medianFamilyIncome",
+      market_size: "schoolAgePopulation",
+      median_income: "medianFamilyIncome",
+      service_map: "facilityCount",
+      subsidized_map: "hudEligibleHouseholds",
+    };
+
+    const targetMetric = tabMetricMap[activeTab];
+    if (targetMetric && currentMetricOptions.some((item) => item.key === targetMetric) && targetMetric !== metricKey) {
+      setMetricKey(targetMetric);
     }
+  }, [activeTab, currentMetricOptions, metricKey]);
+
+  const effectiveSelectedZip = useMemo(() => {
+    const zipKeys = Object.keys(currentZipDrilldowns);
+    if (zipKeys.length === 0) return "";
+    return selectedZip && selectedZip in currentZipDrilldowns ? selectedZip : zipKeys[0];
   }, [currentZipDrilldowns, selectedZip]);
+
+  useEffect(() => {
+    if (effectiveSelectedZip !== selectedZip) {
+      setSelectedZip(effectiveSelectedZip);
+    }
+  }, [effectiveSelectedZip, selectedZip]);
 
   const selectedMetric = useMemo(
     () => currentMetricOptions.find((item) => item.key === metricKey) ?? currentMetricOptions[0],
     [currentMetricOptions, metricKey],
   );
 
-  const zipData = selectedZip ? currentZipDrilldowns[selectedZip] : undefined;
-  const showCompetitorTable = activeView?.tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources", "enrollment"].includes(activeSidebar) && (config.competitors?.length ?? 0) > 0;
-  const showPartnerTable = activeView?.tableVariant === "partner" && (config.competitors?.length ?? 0) > 0;
-  const showScenarioModeler = activeSidebar === "enrollment" && activeTab === "enrollment_scenarios" && config.slug === "schools" && config.analysisResult;
-  const showCatchmentComparison = activeSidebar === "student_body" && activeTab === "catchment_enrollment" && config.slug === "schools";
+  const zipData = effectiveSelectedZip ? currentZipDrilldowns[effectiveSelectedZip] : undefined;
+  const showScenarioModeler =
+    activeSidebar === "enrollment" && activeTab === "enrollment_scenarios" && config.slug === "schools" && config.analysisResult;
+  const showCatchmentComparison =
+    activeSidebar === "student_body" && activeTab === "catchment_enrollment" && config.slug === "schools";
+  const showPartnerTable =
+    activeView?.tableVariant === "partner" &&
+    (PARTNER_TABLE_TABS.has(activeTab) || (currentTabs.length === 1 && activeTab === currentTabs[0]?.key)) &&
+    (config.competitors?.length ?? 0) > 0;
+  const showCompetitorTable =
+    activeView?.tableVariant !== "partner" &&
+    (config.competitors?.length ?? 0) > 0 &&
+    (activeSidebar === "competitors" || COMPETITOR_TABLE_TABS.has(activeTab));
+
+  const showTrendChart = TREND_TABS.has(activeTab);
+  const showMapPanel = MAP_TABS.has(activeTab);
+  const showDrilldownPanel = DRILLDOWN_TABS.has(activeTab) && Object.keys(currentZipDrilldowns).length > 0;
+  const showDistributionChart = DISTRIBUTION_TABS.has(activeTab);
+  const hasFocusedContent =
+    showTrendChart ||
+    showMapPanel ||
+    showDrilldownPanel ||
+    showDistributionChart ||
+    showCompetitorTable ||
+    showPartnerTable ||
+    Boolean(showScenarioModeler) ||
+    showCatchmentComparison;
+  const showFallbackSummary = !hasFocusedContent && currentTabs[0]?.key === activeTab;
 
   const wrapperClassName = `${embedded ? "rounded-2xl bg-[#f7f7fc] p-3 sm:p-4" : "min-h-screen bg-[#f7f7fc] px-4 py-6"} text-slate-900`;
 
   const content = (
     <div className={`mx-auto ${embedded ? "max-w-full" : "max-w-[1600px]"} space-y-5`}>
-      {/* --- Compact header: title + parameter chips on one line --- */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">{config.title}</h1>
           {!embedded && (
-            <Link href={backHref ?? "/dashboard-preview"} className="text-xs font-medium text-indigo-600 hover:text-indigo-800">
-              ← {backLabel ?? "Gallery"}
+            <Link href={backHref ?? "/"} className="text-xs font-medium text-indigo-600 hover:text-indigo-800">
+              ← {backLabel ?? "Back to analysis"}
             </Link>
           )}
         </div>
@@ -110,7 +208,6 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
         />
       </div>
 
-      {/* --- Highlight cards: compact inline strip --- */}
       <div className="flex flex-wrap gap-3">
         {currentHighlightCards.map((card) => (
           <div key={card.label} className="flex items-baseline gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
@@ -120,12 +217,10 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
         ))}
       </div>
 
-      {/* --- Main content: sidebar + data panels --- */}
       <div className="grid gap-5 xl:grid-cols-[240px_minmax(0,1fr)]">
         <DashboardSidebar items={config.sidebarItems} activeKey={activeSidebar} onSelect={setActiveSidebar} />
 
         <section className="space-y-4">
-          {/* Section header with tabs — compact */}
           <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">
@@ -138,7 +233,6 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
             <TabbedSubview tabs={currentTabs} activeKey={activeTab} onChange={setActiveTab} />
           </div>
 
-          {/* Trend chart */}
           {currentCallout ? (
             <div
               className={`rounded-2xl border px-4 py-3 text-sm shadow-sm ${
@@ -152,86 +246,80 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
             </div>
           ) : null}
 
-          <TrendChart
-            title={currentTrendTitle}
-            subtitle={currentTrendSubtitle}
-            data={currentTrendData}
-            series={currentTrendSeries}
-            fileBaseName={`${config.slug}-trend`}
-          />
-
-          {/* Map + drilldown stacked */}
-          <div className="grid gap-6">
-            <ChoroplethMap
-              title={`${selectedMetric?.label ?? "Market"} by ZIP Code`}
-              subtitle="Click a ZIP to open the drilldown card."
-              featureCollection={config.featureCollection}
-              metric={selectedMetric}
-              availableMetrics={currentMetricOptions}
-              selectedZip={selectedZip}
-              onMetricChange={setMetricKey}
-              onZipSelect={(zipCode) => {
-                if (zipCode in currentZipDrilldowns) {
-                  setSelectedZip(zipCode);
-                  requestAnimationFrame(() => {
-                    drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  });
-                } else {
-                  console.warn(
-                    `[Dashboard] ZIP ${zipCode} clicked but not found in drilldowns. Available keys:`,
-                    Object.keys(currentZipDrilldowns),
-                  );
-                  setSelectedZip(zipCode);
-                  requestAnimationFrame(() => {
-                    drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  });
-                }
-              }}
-              fileBaseName={`${config.slug}-choropleth`}
-              competitors={config.competitors}
-              ministryType={config.slug === "elder-care" ? "elder_care" : config.slug}
-              centerLabel={config.address}
-              centerLat={config.centerLat}
-              centerLon={config.centerLon}
-              radiusMiles={config.radiusMiles}
-              boundaryOverlays={config.boundaryOverlays}
+          {(showTrendChart || showFallbackSummary) ? (
+            <TrendChart
+              title={currentTrendTitle}
+              subtitle={currentTrendSubtitle}
+              data={currentTrendData}
+              series={currentTrendSeries}
+              fileBaseName={`${config.slug}-trend`}
             />
+          ) : null}
 
-            {zipData ? (
-              <div ref={drilldownRef}>
-                <ZipDrilldownCard data={zipData} defaultOpen />
-              </div>
-            ) : selectedZip ? (
-              <div
-                ref={drilldownRef}
-                className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
-              >
-                No drilldown data available for ZIP {selectedZip}. This ZIP may have insufficient census tract coverage.
-              </div>
-            ) : (
-              <div
-                ref={drilldownRef}
-                className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
-              >
-                Select a ZIP on the map to open the drilldown card.
-              </div>
-            )}
-          </div>
+          {(showMapPanel || showFallbackSummary) ? (
+            <div className="grid gap-6">
+              <ChoroplethMap
+                title={`${selectedMetric?.label ?? "Market"} by ZIP Code`}
+                subtitle="Click a ZIP to open the drilldown card."
+                featureCollection={config.featureCollection}
+                metric={selectedMetric}
+                availableMetrics={currentMetricOptions}
+                selectedZip={effectiveSelectedZip}
+                onMetricChange={setMetricKey}
+                onZipSelect={(zipCode) => {
+                  setSelectedZip(zipCode);
+                  requestAnimationFrame(() => {
+                    drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
+                }}
+                fileBaseName={`${config.slug}-choropleth`}
+                competitors={config.competitors}
+                ministryType={config.slug === "elder-care" ? "elder_care" : config.slug}
+                centerLabel={config.address}
+                centerLat={config.centerLat}
+                centerLon={config.centerLon}
+                radiusMiles={config.radiusMiles}
+                boundaryOverlays={config.boundaryOverlays}
+              />
 
-          {/* Distribution chart */}
-          <DistributionChart
-            title={currentDistributionTitle}
-            subtitle={currentDistributionSubtitle}
-            data={currentDistributionData}
-            primaryLabel={currentDistributionPrimaryLabel}
-            comparisonLabel={currentDistributionComparisonLabel}
-            primaryColor="#6366f1"
-            comparisonColor="#16a34a"
-            referenceLine={currentDistributionReferenceLine}
-            fileBaseName={`${config.slug}-distribution`}
-          />
+              {(showDrilldownPanel || showFallbackSummary) ? (
+                zipData ? (
+                  <div ref={drilldownRef}>
+                    <ZipDrilldownCard data={zipData} defaultOpen />
+                  </div>
+                ) : effectiveSelectedZip ? (
+                  <div
+                    ref={drilldownRef}
+                    className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
+                  >
+                    No drilldown data available for ZIP {effectiveSelectedZip}. This ZIP may have insufficient census tract coverage.
+                  </div>
+                ) : (
+                  <div
+                    ref={drilldownRef}
+                    className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
+                  >
+                    Select a ZIP on the map to open the drilldown card.
+                  </div>
+                )
+              ) : null}
+            </div>
+          ) : null}
 
-          {/* Competitor table */}
+          {(showDistributionChart || showFallbackSummary) ? (
+            <DistributionChart
+              title={currentDistributionTitle}
+              subtitle={currentDistributionSubtitle}
+              data={currentDistributionData}
+              primaryLabel={currentDistributionPrimaryLabel}
+              comparisonLabel={currentDistributionComparisonLabel}
+              primaryColor="#6366f1"
+              comparisonColor="#16a34a"
+              referenceLine={currentDistributionReferenceLine}
+              fileBaseName={`${config.slug}-distribution`}
+            />
+          ) : null}
+
           {showCompetitorTable && config.competitorCounts ? (
             <CompetitorTable
               schools={config.competitors ?? []}
@@ -244,12 +332,8 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
 
           {showPartnerTable ? <PartnerFacilityTable facilities={config.competitors ?? []} /> : null}
 
-          {/* Scenario modeler (WhatIfSimulator) for schools enrollment tab */}
-          {showScenarioModeler && config.analysisResult ? (
-            <WhatIfSimulator result={config.analysisResult} />
-          ) : null}
+          {showScenarioModeler && config.analysisResult ? <WhatIfSimulator result={config.analysisResult} /> : null}
 
-          {/* Catchment vs. enrollment comparison for schools student body tab */}
           {showCatchmentComparison ? (
             <CatchmentComparisonView
               schoolAgePopulation={config.analysisResult?.demographics.school_age_population}
@@ -262,13 +346,5 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
     </div>
   );
 
-  return embedded ? (
-    <div className={wrapperClassName}>
-      {content}
-    </div>
-  ) : (
-    <main className={wrapperClassName}>
-      {content}
-    </main>
-  );
+  return embedded ? <div className={wrapperClassName}>{content}</div> : <main className={wrapperClassName}>{content}</main>;
 }

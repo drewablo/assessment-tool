@@ -91,7 +91,7 @@ test("toDashboardModuleConfig keeps housing competitors on existing resources vi
 
   assert.equal(config.competitors?.length, 1);
   assert.equal(config.sidebarViews?.existing_resources?.tableVariant, undefined);
-  assert.equal(shouldShowCompetitorTable("existing_resources", config.sidebarViews?.existing_resources?.tableVariant, config.competitors?.length ?? 0), true);
+  assert.equal(shouldShowCompetitorTable("existing_resources", "project_table", config.sidebarViews?.existing_resources?.tableVariant, config.competitors?.length ?? 0), true);
 });
 
 test("dashboardCompetitors falls back to housing_projects when needed", () => {
@@ -171,12 +171,16 @@ test("toDashboardModuleConfig builds elder-care config with sidebar views", () =
 
   assert.equal(config.slug, "elder-care");
   assert.notEqual(config.sidebarViews, undefined);
+
+  assert.notEqual(config.sidebarViews?.community_profile, undefined);
+  assert.notEqual(config.sidebarViews?.market_landscape, undefined);
   assert.notEqual(config.sidebarViews?.partnership_viability, undefined);
   assert.equal(config.sidebarViews?.partnership_viability?.tableVariant, "partner");
 });
 
 test("shouldShowCompetitorTable returns false for partner table variant", () => {
-  assert.equal(shouldShowCompetitorTable("partnership_viability", "partner", 5), false);
-  assert.equal(shouldShowCompetitorTable("competitors", undefined, 5), true);
-  assert.equal(shouldShowCompetitorTable("competitors", undefined, 0), false);
+  assert.equal(shouldShowCompetitorTable("partnership_viability", "potential_partners", "partner", 5), false);
+  assert.equal(shouldShowCompetitorTable("competitors", "competitor_map", undefined, 5), true);
+  assert.equal(shouldShowCompetitorTable("existing_resources", "project_table", undefined, 5), true);
+  assert.equal(shouldShowCompetitorTable("competitors", "competitor_map", undefined, 0), false);
 });
