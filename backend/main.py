@@ -945,12 +945,19 @@ async def api_key_middleware(request: Request, call_next):
 
 @app.get("/api/health")
 async def health():
+    """Lightweight liveness probe used by Docker healthcheck and load balancers.
+    Does a single SELECT 1 to confirm DB connectivity; heavy diagnostics live at /api/data-health."""
     info = {"status": "ok", "version": "2.0.0", "database": USE_DB}
     if USE_DB:
-        health_payload = await _collect_db_data_health()
-        info["db_connected"] = health_payload.get("db_connected", False)
-        info["db_target"] = health_payload.get("db_target")
-        info["warnings"] = health_payload.get("warnings", [])[:3]
+        from db.connection import engine
+        from sqlalchemy import text
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            info["db_connected"] = True
+        except Exception as exc:
+            info["db_connected"] = False
+            info["db_error"] = exc.__class__.__name__
     return info
 
 

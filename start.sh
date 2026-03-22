@@ -19,9 +19,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
-COMPOSE_DEV="docker-compose.yml"
-COMPOSE_PROD="docker-compose.prod.yml"
-ENV_PROD=".env.prod"
+COMPOSE_DEV="$ROOT_DIR/docker-compose.yml"
+COMPOSE_PROD="$ROOT_DIR/docker-compose.prod.yml"
+ENV_PROD="$ROOT_DIR/.env.prod"
 
 CMD="${1:-dev}"
 
@@ -155,6 +155,7 @@ cmd_prod() {
   info "  ./start.sh logs --prod     Tail all logs"
   info "  ./start.sh stop --prod     Stop all services"
   info "  ./start.sh update          Pull latest + rebuild"
+  info "  ./start.sh ingest --pipeline census-history --prod  # load dashboard ACS history"
 }
 
 # ---------------------------------------------------------------------------
@@ -412,12 +413,13 @@ cmd_ingest() {
   case "$PIPELINE" in
     all) CLI_CMD=(python -m pipeline.cli ingest-all --vintage "$VINTAGE") ;;
     census) CLI_CMD=(python -m pipeline.cli ingest-census --vintage "$VINTAGE") ;;
+    census-history) CLI_CMD=(python -m pipeline.cli ingest-census-history) ;;
     schools) CLI_CMD=(python -m pipeline.cli ingest-schools) ;;
     elder-care) CLI_CMD=(python -m pipeline.cli ingest-elder-care) ;;
     housing) CLI_CMD=(python -m pipeline.cli ingest-housing) ;;
     section-202) CLI_CMD=(python -m pipeline.cli ingest-hud-section202) ;;
     status) CLI_CMD=(python -m pipeline.cli status) ;;
-    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|schools|elder-care|housing|section-202|status" ;;
+    *) die "Unknown pipeline '$PIPELINE'. Use: all|census|census-history|schools|elder-care|housing|section-202|status" ;;
   esac
 
   if [[ "$PIPELINE" == "all" || "$PIPELINE" == "census" ]] && [[ -n "$STATES" ]]; then
@@ -425,6 +427,9 @@ cmd_ingest() {
   fi
 
   step "Running ingestion in api container (pipeline=$PIPELINE)"
+  if ! "${COMPOSE_CMD[@]}" ps --status running api 2>/dev/null | grep -q api; then
+    die "The 'api' container is not running. Start the stack first:\n  ./start.sh prod        (first-time setup)\n  ./start.sh prod        (if stopped)"
+  fi
   "${COMPOSE_CMD[@]}" exec -T api "${CLI_CMD[@]}"
 
   step "Post-ingest readiness check"
@@ -470,6 +475,7 @@ cmd_help() {
     ./start.sh doctor --prod             # API-level DB readiness checks
     ./start.sh doctor [--prod]           # bracket form also accepted
     ./start.sh ingest --prod             # ingest all datasets into DB
+    ./start.sh ingest --pipeline census-history --prod  # ingest dashboard ACS history
     ./start.sh ingest --pipeline section-202 --prod  # ingest Section 202 only
 
 USAGE

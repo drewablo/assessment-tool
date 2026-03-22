@@ -131,7 +131,7 @@ class CensusTractHistory(Base):
     ingested_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     __table_args__ = (
-        Index("ix_history_geoid_vintage", "geoid", "acs_vintage", unique=True),
+        UniqueConstraint("geoid", "acs_vintage", name="ix_history_geoid_vintage"),
     )
 
 

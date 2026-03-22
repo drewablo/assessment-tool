@@ -116,6 +116,7 @@ TIGER_SHAPEFILE_VINTAGE = os.getenv("TIGER_VINTAGE", "2022")
 # Retry settings for Census API and TIGER downloads
 _MAX_RETRIES = 4
 _RETRY_BACKOFF_BASE = 4  # seconds; retry delays: 4, 8, 16, 32
+_HISTORY_BATCH = 500  # max rows per upsert to stay under DB bind-parameter limits
 _ACS_BATCH_SIZE = 48  # Census API max is 50 vars; keep room for NAME + geo columns
 
 
@@ -697,39 +698,33 @@ async def _ingest_acs_data_async(vintage: str = "2022", states: list[str] | None
     }
 
 
-async def ingest_historical(vintage: str = "2017", states: list[str] | None = None):
-    """Ingest a historical ACS vintage into the history table for trend analysis."""
-    target_states = states or STATE_FIPS
-    total = 0
+async def _ingest_historical_state(state_fips: str, vintage: str) -> int:
+    """Fetch and upsert historical ACS data for one state. Returns row count."""
+    async with httpx.AsyncClient() as client:
+        rows = await _fetch_acs_state(client, state_fips, vintage)
 
-    for state_fips in target_states:
-        async with httpx.AsyncClient() as client:
-            try:
-                rows = await _fetch_acs_state(client, state_fips, vintage)
-            except Exception as exc:
-                logger.error("Historical ingest: failed to fetch state %s: %s", state_fips, exc)
-                continue
+    if not rows:
+        return 0
 
-        if not rows:
-            continue
+    history_rows = [
+        {
+            "geoid": t["geoid"],
+            "acs_vintage": vintage,
+            "total_population": t["total_population"],
+            "population_5_17": t["population_5_17"],
+            "median_household_income": t["median_household_income"],
+            "families_with_own_children": t["families_with_own_children"],
+            "population_65_74": t["population_65_74"],
+            "population_75_plus": t["population_75_plus"],
+            "total_households": t["total_households"],
+        }
+        for t in (_transform_tract(r, vintage) for r in rows)
+    ]
 
-        history_rows = []
-        for row in rows:
-            transformed = _transform_tract(row, vintage)
-            history_rows.append({
-                "geoid": transformed["geoid"],
-                "acs_vintage": vintage,
-                "total_population": transformed["total_population"],
-                "population_5_17": transformed["population_5_17"],
-                "median_household_income": transformed["median_household_income"],
-                "families_with_own_children": transformed["families_with_own_children"],
-                "population_65_74": transformed["population_65_74"],
-                "population_75_plus": transformed["population_75_plus"],
-                "total_households": transformed["total_households"],
-            })
-
-        async with async_session_factory() as session:
-            stmt = pg_insert(CensusTractHistory).values(history_rows)
+    async with async_session_factory() as session:
+        for chunk_start in range(0, len(history_rows), _HISTORY_BATCH):
+            chunk = history_rows[chunk_start : chunk_start + _HISTORY_BATCH]
+            stmt = pg_insert(CensusTractHistory).values(chunk)
             stmt = stmt.on_conflict_do_update(
                 constraint="ix_history_geoid_vintage",
                 set_={
@@ -743,8 +738,35 @@ async def ingest_historical(vintage: str = "2017", states: list[str] | None = No
                 },
             )
             await session.execute(stmt)
-            await session.commit()
-            total += len(history_rows)
+        await session.commit()
+
+    return len(history_rows)
+
+
+async def ingest_historical(vintage: str = "2017", states: list[str] | None = None):
+    """Ingest a historical ACS vintage into the history table for trend analysis."""
+    target_states = states or STATE_FIPS
+    total = 0
+    batch_size = 5
+
+    logger.info("Historical ingest: vintage=%s total_states=%d", vintage, len(target_states))
+
+    for i in range(0, len(target_states), batch_size):
+        batch = target_states[i : i + batch_size]
+        logger.info(
+            "Historical ingest: vintage=%s states %d-%d/%d: %s",
+            vintage, i + 1, min(i + batch_size, len(target_states)), len(target_states), batch,
+        )
+        results = await asyncio.gather(
+            *[_ingest_historical_state(st, vintage) for st in batch],
+            return_exceptions=True,
+        )
+        for st, result in zip(batch, results):
+            if isinstance(result, Exception):
+                logger.error("Historical ingest: vintage=%s state=%s failed: %s", vintage, st, result)
+            else:
+                total += result
+                logger.info("Historical ingest: vintage=%s state=%s records=%d", vintage, st, result)
 
     return {"vintage": vintage, "total_records": total}
 

@@ -48,7 +48,9 @@ ZCTA_CACHE_PATH = Path(os.getenv("ZCTA_CACHE_PATH", Path(__file__).resolve().par
 
 DASHBOARD_DATA_YEAR = int(os.getenv("DASHBOARD_DATA_YEAR", "2024"))
 DASHBOARD_PROJECTION_HORIZON = int(os.getenv("DASHBOARD_PROJECTION_HORIZON", "5"))
-DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "24"))
+DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "75"))
+DASHBOARD_MIN_ZIP_COVERAGE = float(os.getenv("DASHBOARD_MIN_ZIP_COVERAGE", "0.02"))
+DASHBOARD_HISTORICAL_YEARS = [2013, 2015, 2017, 2019, 2021]
 
 
 @dataclass(frozen=True)
@@ -290,13 +292,26 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
         intersections.append((entry.zip_code, overlap_area))
 
     intersections.sort(key=lambda item: item[1], reverse=True)
-    intersections = intersections[:DASHBOARD_MAX_ZIPS]
 
-    total_overlap = sum(area for _, area in intersections) or 1.0
-    weights = {zip_code: area / total_overlap for zip_code, area in intersections}
+    zip_coverages: list[tuple[str, float]] = []
+    for zip_code, overlap_area in intersections:
+        feature = candidate_features.get(zip_code)
+        if not feature or not feature.get("geometry"):
+            continue
+        try:
+            zip_area = shape(feature["geometry"]).area
+        except Exception:
+            zip_area = overlap_area
+        coverage = min(overlap_area / max(zip_area, 1e-12), 1.0)
+        if coverage >= DASHBOARD_MIN_ZIP_COVERAGE:
+            zip_coverages.append((zip_code, coverage))
+
+    zip_coverages = zip_coverages[:DASHBOARD_MAX_ZIPS]
+    total_coverage = sum(coverage for _, coverage in zip_coverages) or 1.0
+    weights = {zip_code: coverage / total_coverage for zip_code, coverage in zip_coverages}
 
     selected_features: list[dict[str, Any]] = []
-    for zip_code, _ in intersections:
+    for zip_code, _ in zip_coverages:
         feature = json.loads(json.dumps(candidate_features[zip_code]))
         props = feature.setdefault("properties", {})
         props["zipCode"] = zip_code
@@ -304,7 +319,7 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
         selected_features.append(feature)
 
     return DashboardSpatialContext(
-        zip_codes=[zip_code for zip_code, _ in intersections],
+        zip_codes=[zip_code for zip_code, _ in zip_coverages],
         feature_collection={"type": "FeatureCollection", "features": selected_features},
         geometry_source="census_zcta_cache",
         selection_method=selection_method,
@@ -587,10 +602,11 @@ def _assign_competitors_to_zips(
             row["competitor_rating_count"] += 1
 
 
-def _backcast_series(current_value: float, pct_change: float | None, target_years: list[int], current_year: int = 2022) -> dict[int, float]:
+def _backcast_series(current_value: float, pct_change: float | None, target_years: list[int], current_year: int = DASHBOARD_DATA_YEAR) -> dict[int, float]:
     if current_value < 0:
         return {}
     if pct_change is None:
+        logger.warning("_backcast_series: no trend data available; returning flat history for %d target years", len(target_years))
         return {year: current_value for year in target_years}
 
     start_year = min(target_years) if target_years else current_year
@@ -669,16 +685,18 @@ def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialC
     for zip_code in spatial.zip_codes:
         row = current_by_zip[zip_code]
         base_income = _weighted_income(row, "median_household_income")
-        households_history = _backcast_series(row["total_households"], getattr(trend, "families_pct", None), [2017, 2019])
-        population_history = _backcast_series(row["total_population"], getattr(trend, "school_age_pop_pct", None), [2017, 2019])
-        family_history = _backcast_series(row["families_with_children"], getattr(trend, "families_pct", None), [2017, 2019])
-        school_age_history = _backcast_series(row["school_age_population"], getattr(trend, "school_age_pop_pct", None), [2017, 2019])
-        income_history = _backcast_series(base_income, getattr(trend, "income_real_pct", None), [2017, 2019])
+        households_history = _backcast_series(row["total_households"], getattr(trend, "families_pct", None), DASHBOARD_HISTORICAL_YEARS)
+        population_history = _backcast_series(row["total_population"], getattr(trend, "school_age_pop_pct", None), DASHBOARD_HISTORICAL_YEARS)
+        family_history = _backcast_series(row["families_with_children"], getattr(trend, "families_pct", None), DASHBOARD_HISTORICAL_YEARS)
+        school_age_history = _backcast_series(row["school_age_population"], getattr(trend, "school_age_pop_pct", None), DASHBOARD_HISTORICAL_YEARS)
+        income_history = _backcast_series(base_income, getattr(trend, "income_real_pct", None), DASHBOARD_HISTORICAL_YEARS)
+        seniors65_history = _backcast_series(row["seniors_65_plus"], None, DASHBOARD_HISTORICAL_YEARS)
+        seniors75_history = _backcast_series(row["seniors_75_plus"], None, DASHBOARD_HISTORICAL_YEARS)
         history_by_zip[zip_code] = {}
         renter_ratio = row["renter_households"] / max(row["total_households"], 1.0)
         burden_ratio = row["cost_burdened_renter_households"] / max(row["renter_households"], 1.0)
         hud_ratio = row["hud_eligible_households"] / max(row["total_households"], 1.0)
-        for year in [2017, 2019]:
+        for year in DASHBOARD_HISTORICAL_YEARS:
             hist_households = households_history.get(year, row["total_households"])
             hist_population = population_history.get(year, row["total_population"])
             hist_renters = hist_households * renter_ratio
@@ -690,12 +708,12 @@ def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialC
                 "hud_eligible_households": hist_households * hud_ratio,
                 "families_with_children": family_history.get(year, row["families_with_children"]),
                 "school_age_population": school_age_history.get(year, row["school_age_population"]),
-                "seniors_65_plus": _backcast_series(row["seniors_65_plus"], None, [year]).get(year, row["seniors_65_plus"]),
-                "seniors_75_plus": _backcast_series(row["seniors_75_plus"], None, [year]).get(year, row["seniors_75_plus"]),
+                "seniors_65_plus": seniors65_history.get(year, row["seniors_65_plus"]),
+                "seniors_75_plus": seniors75_history.get(year, row["seniors_75_plus"]),
                 "median_household_income_weighted_sum": income_history.get(year, base_income) * max(hist_population, 1.0),
                 "median_household_income_weight": max(hist_population, 1.0),
             }
-    return current_by_zip, history_by_zip, 2022
+    return current_by_zip, history_by_zip, DASHBOARD_DATA_YEAR
 
 
 def _history_metric(history_by_zip: dict[str, dict[int, dict[str, float]]], zip_codes: list[str], key: str) -> dict[int, float]:
