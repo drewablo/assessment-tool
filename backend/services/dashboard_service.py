@@ -53,6 +53,18 @@ DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "75"))
 DASHBOARD_MIN_ZIP_COVERAGE = float(os.getenv("DASHBOARD_MIN_ZIP_COVERAGE", "0.05"))
 DASHBOARD_HISTORICAL_YEARS = [2013, 2015, 2017, 2019, 2021]
 
+_STATE_FIPS_TO_ABBR = {
+    "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA", "08": "CO",
+    "09": "CT", "10": "DE", "11": "DC", "12": "FL", "13": "GA", "15": "HI",
+    "16": "ID", "17": "IL", "18": "IN", "19": "IA", "20": "KS", "21": "KY",
+    "22": "LA", "23": "ME", "24": "MD", "25": "MA", "26": "MI", "27": "MN",
+    "28": "MS", "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH",
+    "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND", "39": "OH",
+    "40": "OK", "41": "OR", "42": "PA", "44": "RI", "45": "SC", "46": "SD",
+    "47": "TN", "48": "TX", "49": "UT", "50": "VT", "51": "VA", "53": "WA",
+    "54": "WV", "55": "WI", "56": "WY",
+}
+
 
 @dataclass(frozen=True)
 class ZctaBboxEntry:
@@ -454,9 +466,9 @@ def _init_zip_row() -> dict[str, float]:
     }
 
 
-async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int | None]:
+async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int | None, dict[str, str]]:
     if not spatial.zip_codes:
-        return {}, {}, None
+        return {}, {}, None, {}
 
     try:
         from geoalchemy2.shape import to_shape
@@ -467,7 +479,7 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
         from db.queries import get_tracts_in_catchment
     except Exception:
         logger.info("Dashboard DB aggregates unavailable; falling back to spatial weighting", exc_info=True)
-        return {}, {}, None
+        return {}, {}, None, {}
 
     try:
         async with get_session() as session:
@@ -479,11 +491,13 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
                 isochrone_geojson=result.isochrone_polygon,
             )
             if not tracts:
-                return {}, {}, None
+                return {}, {}, None, {}
 
             prepared = {zip_code: prep(shape(feature["geometry"])) for zip_code, feature in ((feature["properties"]["zipCode"], feature) for feature in spatial.feature_collection["features"])}
             current_by_zip: dict[str, dict[str, float]] = {zip_code: _init_zip_row() for zip_code in spatial.zip_codes}
             tract_to_zip: dict[str, str] = {}
+            # Track (county_fips, state_fips) → population weight per ZIP for majority-vote labeling
+            zip_county_votes: dict[str, dict[tuple[str, str], float]] = defaultdict(lambda: defaultdict(float))
             data_year: int | None = None
 
             for tract in tracts:
@@ -512,6 +526,8 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
                 tract_to_zip[tract.geoid] = assigned_zip
                 row = current_by_zip[assigned_zip]
                 pop = float(tract.total_population or 0)
+                if tract.county_fips and tract.state_fips:
+                    zip_county_votes[assigned_zip][(tract.county_fips, tract.state_fips)] += max(pop, 1.0)
                 households = float(tract.total_households or 0)
                 row["total_population"] += pop
                 row["total_households"] += households
@@ -540,7 +556,7 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
             _assign_competitors_to_zips(result.competitor_schools, current_by_zip, prepared)
 
             if not tract_to_zip:
-                return {}, {}, data_year
+                return {}, {}, data_year, {}
 
             history_stmt = select(CensusTractHistory).where(CensusTractHistory.geoid.in_(list(tract_to_zip.keys())))
             history_rows = list((await session.execute(history_stmt)).scalars().all())
@@ -569,10 +585,19 @@ async def _load_db_aggregates(result: AnalysisResponse, spatial: DashboardSpatia
                     bucket["median_household_income_weighted_sum"] += float(hist.median_household_income) * max(pop, 1.0)
                     bucket["median_household_income_weight"] += max(pop, 1.0)
 
-            return current_by_zip, {zip_code: dict(years) for zip_code, years in history_by_zip.items()}, data_year
+            # Build per-ZIP county label from majority-vote tract data
+            zip_county_labels: dict[str, str] = {}
+            for zc, votes in zip_county_votes.items():
+                if votes:
+                    (best_county, best_state), _ = max(votes.items(), key=lambda x: x[1])
+                    state_abbr = _STATE_FIPS_TO_ABBR.get(best_state, "")
+                    if best_county and state_abbr:
+                        zip_county_labels[zc] = f"FIPS {best_county}, {state_abbr}"
+
+            return current_by_zip, {zip_code: dict(years) for zip_code, years in history_by_zip.items()}, data_year, zip_county_labels
     except Exception:
         logger.warning("Dashboard DB aggregate load failed; falling back to spatial weighting", exc_info=True)
-        return {}, {}, None
+        return {}, {}, None, {}
 
 
 def _assign_competitors_to_zips(
@@ -647,7 +672,7 @@ def _weighted_income(row: dict[str, float], prefix: str) -> float:
     return _safe_float(raw)
 
 
-def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int]:
+def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialContext) -> tuple[dict[str, dict[str, float]], dict[str, dict[int, dict[str, float]]], int, dict[str, str]]:
     current_by_zip: dict[str, dict[str, float]] = {zip_code: _init_zip_row() for zip_code in spatial.zip_codes}
     households = float(result.demographics.total_households or 0)
     population = float(result.demographics.total_population or 0)
@@ -721,7 +746,9 @@ def _area_weighted_fallback(result: AnalysisResponse, spatial: DashboardSpatialC
                 "median_household_income_weighted_sum": income_history.get(year, base_income) * max(hist_population, 1.0),
                 "median_household_income_weight": max(hist_population, 1.0),
             }
-    return current_by_zip, history_by_zip, DASHBOARD_DATA_YEAR
+    # Fallback: use result.county_name for all ZIPs (no per-ZIP tract data available)
+    fallback_labels = {zc: result.county_name for zc in spatial.zip_codes} if result.county_name else {}
+    return current_by_zip, history_by_zip, DASHBOARD_DATA_YEAR, fallback_labels
 
 
 def _history_metric(history_by_zip: dict[str, dict[int, dict[str, float]]], zip_codes: list[str], key: str) -> dict[int, float]:
@@ -748,7 +775,7 @@ def _zip_distribution(base_distribution: list[tuple[str, float]], weight: float,
     return _normalize_distribution([(label, value * weight) for label, value in base_distribution], current_total, projected_total)
 
 
-def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int, zip_county_labels: dict[str, str] | None = None) -> DashboardModuleData:
     metric_maps = {key: {} for key in ("schoolAgePopulation", "familiesWithChildren", "medianFamilyIncome", "competitorCount")}
     drilldowns: dict[str, DashboardZipDrilldown] = {}
     base_distribution = _current_distribution_from_result(result)
@@ -768,7 +795,7 @@ def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
 
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
-            place_label=result.county_name,
+            place_label=(zip_county_labels or {}).get(zip_code) or result.county_name,
             summary="This ZIP highlights family demand, income capacity, and competitor context within the selected school market.",
             current_year=data_year,
             projected_year=_projection_years()[-1],
@@ -854,7 +881,7 @@ def _build_schools_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
     )
 
 
-def _build_elder_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+def _build_elder_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int, zip_county_labels: dict[str, str] | None = None) -> DashboardModuleData:
     metric_maps = {key: {} for key in ("seniors65Plus", "seniors75Plus", "medianSeniorIncome", "facilityCount")}
     drilldowns: dict[str, DashboardZipDrilldown] = {}
     base_distribution = _current_distribution_from_result(result)
@@ -873,7 +900,7 @@ def _build_elder_payload(zip_codes: list[str], current_by_zip: dict[str, dict[st
         projected75 = series75[-1].value if series75 else row["seniors_75_plus"]
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
-            place_label=result.county_name,
+            place_label=(zip_county_labels or {}).get(zip_code) or result.county_name,
             summary="This ZIP highlights senior concentration, living-alone risk, and local care-market quality context.",
             current_year=data_year,
             projected_year=_projection_years()[-1],
@@ -945,7 +972,7 @@ def _build_elder_payload(zip_codes: list[str], current_by_zip: dict[str, dict[st
     )
 
 
-def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int) -> DashboardModuleData:
+def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[str, float]], history_by_zip: dict[str, dict[int, dict[str, float]]], result: AnalysisResponse, data_year: int, zip_county_labels: dict[str, str] | None = None) -> DashboardModuleData:
     metric_maps = {key: {} for key in ("totalPopulation", "costBurdenedHouseholds", "costBurdenRate", "renterHouseholds", "hudEligibleHouseholds", "medianHouseholdIncome")}
     drilldowns: dict[str, DashboardZipDrilldown] = {}
     base_distribution = _current_distribution_from_result(result)
@@ -965,7 +992,7 @@ def _build_housing_payload(zip_codes: list[str], current_by_zip: dict[str, dict[
         projected_hud = row["hud_eligible_households"] * 1.03
         drilldowns[zip_code] = DashboardZipDrilldown(
             zip_code=zip_code,
-            place_label=result.county_name,
+            place_label=(zip_county_labels or {}).get(zip_code) or result.county_name,
             summary="This ZIP highlights renter need, cost burden, and income thresholds within the housing market.",
             current_year=data_year,
             projected_year=_projection_years()[-1],
@@ -1068,17 +1095,17 @@ def _apply_metric_properties(spatial: DashboardSpatialContext, metric_maps: dict
 
 async def build_dashboard_response(*, request: AnalysisRequest, result: AnalysisResponse, location: dict[str, Any]) -> DashboardResponse:
     spatial = _select_zcta_records(result)
-    current_by_zip, history_by_zip, data_year = await _load_db_aggregates(result, spatial)
+    current_by_zip, history_by_zip, data_year, zip_county_labels = await _load_db_aggregates(result, spatial)
     if not current_by_zip:
-        current_by_zip, history_by_zip, fallback_year = _area_weighted_fallback(result, spatial)
+        current_by_zip, history_by_zip, fallback_year, zip_county_labels = _area_weighted_fallback(result, spatial)
         data_year = data_year or fallback_year
 
     if result.ministry_type == "elder_care":
-        module_data = _build_elder_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+        module_data = _build_elder_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR, zip_county_labels)
     elif result.ministry_type == "housing":
-        module_data = _build_housing_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+        module_data = _build_housing_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR, zip_county_labels)
     else:
-        module_data = _build_schools_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR)
+        module_data = _build_schools_payload(spatial.zip_codes, current_by_zip, history_by_zip, result, data_year or DASHBOARD_DATA_YEAR, zip_county_labels)
 
     _sanitize_metric_maps(module_data.metric_maps)
     feature_collection = _apply_metric_properties(spatial, module_data.metric_maps)
