@@ -49,16 +49,16 @@ function SubIndicatorRow({ sub }: { sub: SubIndicator }) {
 
   return (
     <div className="flex items-center gap-3 py-1">
-      <span className="text-[11px] text-gray-500 w-40 flex-shrink-0 truncate" title={sub.label}>
+      <span className="text-[11px] text-slate-500 w-40 flex-shrink-0 truncate" title={sub.label}>
         {sub.label}
       </span>
-      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full ${barColor}`}
           style={{ width: `${sub.score}%` }}
         />
       </div>
-      <span className="text-[11px] font-semibold text-gray-700 w-8 text-right">{sub.score}</span>
+      <span className="text-[11px] font-semibold text-slate-800 w-8 text-right">{sub.score}</span>
     </div>
   );
 }
@@ -68,7 +68,7 @@ function IndexCard({ metric }: { metric: MetricScore }) {
   const barColor = barColors[metric.rating] ?? barColors.weak;
 
   return (
-    <div className={`rounded-lg border p-4 ${colorClass}`}>
+    <div className={`rounded-[24px] border p-4 ${colorClass}`}>
       <div className="flex items-center justify-between mb-2">
         <div>
           <h4 className="text-sm font-semibold">{metric.label}</h4>
@@ -114,18 +114,18 @@ export default function HierarchicalScorePanel({ hierarchical, ministryType }: P
   const panelCopy = PANEL_COPY[ministryType] ?? PANEL_COPY.schools;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+    <div className="bg-white rounded-[28px] border border-slate-200 shadow-sm p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Layers className="w-4 h-4 text-purple-500" />
-          <h3 className="font-semibold text-gray-900">{panelCopy.title}</h3>
+          <h3 className="font-semibold text-slate-950">{panelCopy.title}</h3>
         </div>
-        <div className="text-sm text-gray-500">
-          Composite: <span className="font-bold text-gray-900">{hOverall}</span>/100
+        <div className="text-sm text-slate-500">
+          Composite: <span className="font-bold text-slate-950">{hOverall}</span>/100
         </div>
       </div>
 
-      <p className="text-xs text-gray-500 mb-4">
+      <p className="text-xs text-slate-500 mb-4">
         {panelCopy.description}
       </p>
 

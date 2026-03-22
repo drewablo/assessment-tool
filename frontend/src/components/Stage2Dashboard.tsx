@@ -64,7 +64,7 @@ function bandClasses(band: Band): string {
   if (band === "caution") return "bg-yellow-50 text-yellow-700";
   if (band === "at_risk") return "bg-orange-50 text-orange-700";
   if (band === "critical") return "bg-red-50 text-red-700";
-  return "bg-gray-100 text-gray-600";
+  return "bg-slate-100 text-slate-600";
 }
 
 function bandLabel(band: Band): string {
@@ -86,9 +86,9 @@ function interpretation(metricName: string, score: number | null): string {
 export default function Stage2Dashboard({ stage2, ministryType = "schools" }: Props) {
   if (stage2.readiness === "not_ready") {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        <h3 className="text-lg font-semibold text-gray-900">{ministryType === "schools" ? "Institutional Financial Health" : ministryType === "housing" ? "Housing Operating Health" : "Elder Care Operating Health"}</h3>
-        <p className="text-sm text-gray-600 mt-2">Enter financial data to generate Stage 2 institutional analysis.</p>
+      <div className="bg-white rounded-[28px] border border-slate-200 shadow-sm p-6">
+        <h3 className="text-lg font-semibold tracking-tight text-slate-950">{ministryType === "schools" ? "Institutional Financial Health" : ministryType === "housing" ? "Housing Operating Health" : "Elder Care Operating Health"}</h3>
+        <p className="mt-2 text-sm text-slate-500">Enter financial data to generate Stage 2 institutional analysis.</p>
       </div>
     );
   }
@@ -114,9 +114,9 @@ export default function Stage2Dashboard({ stage2, ministryType = "schools" }: Pr
   const overallBand = scoreBand(stage2.score);
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
+    <div className="bg-white rounded-[28px] border border-slate-200 shadow-sm p-6 space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h3 className="text-lg font-semibold text-gray-900">{ministryType === "schools" ? "Institutional Financial Health" : ministryType === "housing" ? "Housing Operating Health" : "Elder Care Operating Health"}</h3>
+        <h3 className="text-lg font-semibold tracking-tight text-slate-950">{ministryType === "schools" ? "Institutional Financial Health" : ministryType === "housing" ? "Housing Operating Health" : "Elder Care Operating Health"}</h3>
         {stage2.available && stage2.score != null && (
           <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${bandClasses(overallBand)}`}>
             Stage 2 Score: {stage2.score}/100
@@ -125,27 +125,27 @@ export default function Stage2Dashboard({ stage2, ministryType = "schools" }: Pr
       </div>
 
       {stage2.readiness === "partial" && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+        <div className="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
           Partial data — score is estimated from available inputs. Missing: {missingInputsText || "none listed"}
         </div>
       )}
 
       {groups.map((group) => (
         <section key={group.title} className="space-y-2">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{group.title}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{group.title}</p>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {group.metrics.map((metric) => {
               const score = componentsByKey.get(metric.key)?.score ?? null;
               const band = scoreBand(score);
               return (
-                <div key={metric.key} className="rounded-xl border border-gray-200 shadow-sm p-3 bg-white space-y-2">
+                <div key={metric.key} className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm space-y-2">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-semibold text-gray-900">{metric.name}</p>
+                    <p className="text-sm font-semibold text-slate-950">{metric.name}</p>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${bandClasses(band)}`}>{bandLabel(band)}</span>
                   </div>
-                  <p className="text-xs text-gray-500">{score == null ? "—" : `${score}/100`}</p>
-                  <p className="text-xs text-gray-600">{metric.benchmark}</p>
-                  <p className="text-xs text-gray-700">{interpretation(metric.name, score)}</p>
+                  <p className="text-xs text-slate-500">{score == null ? "—" : `${score}/100`}</p>
+                  <p className="text-xs text-slate-500">{metric.benchmark}</p>
+                  <p className="text-xs text-slate-800">{interpretation(metric.name, score)}</p>
                 </div>
               );
             })}
@@ -154,26 +154,26 @@ export default function Stage2Dashboard({ stage2, ministryType = "schools" }: Pr
       ))}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="rounded-xl border border-gray-200 shadow-sm p-3 bg-white">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Top Risks</p>
+        <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 mb-2">Top Risks</p>
           {topRisks.length === 0 ? (
-            <p className="text-sm text-gray-500">Insufficient data to identify top risks.</p>
+            <p className="text-sm text-slate-500">Insufficient data to identify top risks.</p>
           ) : (
             <ul className="space-y-1">
               {topRisks.map((item) => (
-                <li key={item.key} className="text-sm text-gray-700">{item.name}: {item.score}/100</li>
+                <li key={item.key} className="text-sm text-slate-800">{item.name}: {item.score}/100</li>
               ))}
             </ul>
           )}
         </div>
-        <div className="rounded-xl border border-gray-200 shadow-sm p-3 bg-white">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Strengths</p>
+        <div className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 mb-2">Strengths</p>
           {strengths.length === 0 ? (
-            <p className="text-sm text-gray-500">Insufficient data to identify strengths.</p>
+            <p className="text-sm text-slate-500">Insufficient data to identify strengths.</p>
           ) : (
             <ul className="space-y-1">
               {strengths.map((item) => (
-                <li key={item.key} className="text-sm text-gray-700">{item.name}: {item.score}/100</li>
+                <li key={item.key} className="text-sm text-slate-800">{item.name}: {item.score}/100</li>
               ))}
             </ul>
           )}
@@ -181,7 +181,7 @@ export default function Stage2Dashboard({ stage2, ministryType = "schools" }: Pr
       </div>
 
       {!stage2.available && (
-        <p className="text-sm text-gray-600">Enter 1–3 years of financial data above to unlock the full Stage 2 analysis.</p>
+        <p className="text-sm text-slate-500">Enter 1–3 years of financial data above to unlock the full Stage 2 analysis.</p>
       )}
     </div>
   );
