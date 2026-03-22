@@ -60,14 +60,14 @@ function InfoTooltip({ label }: { label: string }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="ml-1 text-gray-400 hover:text-gray-600 transition-colors focus:outline-none"
+        className="ml-1 text-slate-400 hover:text-slate-600 transition-colors focus:outline-none"
         aria-label={`Info about ${label}`}
       >
         <Info size={13} />
       </button>
       {open && (
-        <div className="absolute z-50 left-1/2 -translate-x-1/2 top-6 w-60 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3 leading-relaxed">
-          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-gray-900 rotate-45" />
+        <div className="absolute z-50 left-1/2 -translate-x-1/2 top-6 w-60 bg-slate-950 text-white text-xs rounded-lg shadow-lg p-3 leading-relaxed">
+          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-950 rotate-45" />
           {explanation}
         </div>
       )}
@@ -79,14 +79,14 @@ export default function MetricCard({ metric }: Props) {
   const styles = ratingStyles[metric.rating] ?? ratingStyles.weak;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+    <div className="bg-white rounded-[28px] border border-slate-200 p-5 shadow-sm">
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center">
-            <h3 className="font-semibold text-gray-900">{metric.label}</h3>
+            <h3 className="font-semibold text-slate-950">{metric.label}</h3>
             <InfoTooltip label={metric.label} />
           </div>
-          <p className="text-xs text-gray-500 mt-0.5">{metric.weight}% of overall score</p>
+          <p className="mt-0.5 text-xs text-slate-500">{metric.weight}% of overall score</p>
         </div>
         <span className={`text-xs font-semibold px-2 py-1 rounded-full ${styles.badge}`}>
           {styles.text}
@@ -94,11 +94,11 @@ export default function MetricCard({ metric }: Props) {
       </div>
 
       <div className="mb-3">
-        <div className="flex justify-between text-xs text-gray-400 mb-1">
+        <div className="flex justify-between text-xs text-slate-400 mb-1">
           <span>Score</span>
-          <span className="font-bold text-gray-700">{metric.score}/100</span>
+          <span className="font-bold text-slate-800">{metric.score}/100</span>
         </div>
-        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-700 ${styles.bar}`}
             style={{ width: `${metric.score}%` }}
@@ -106,7 +106,7 @@ export default function MetricCard({ metric }: Props) {
         </div>
       </div>
 
-      <p className="text-xs text-gray-600 leading-relaxed">{metric.description}</p>
+      <p className="text-xs leading-relaxed text-slate-500">{metric.description}</p>
     </div>
   );
 }

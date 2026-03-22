@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import AnalysisForm from "@/components/AnalysisForm";
 import ResultsDashboard from "@/components/ResultsDashboard";
@@ -21,7 +20,6 @@ const DB_ENABLED = (process.env.NEXT_PUBLIC_USE_DB || "").toLowerCase() === "tru
 const PREFILL_ANALYSIS_KEY = "intelligence_prefill_analysis";
 
 export default function HomePage() {
-  const [lane, setLane] = useState<"quick_screen" | "deep_review">("quick_screen");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
@@ -126,66 +124,37 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+    <div className="min-h-screen bg-[#f7f7fc]">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "#172d57" }}>
-              <span className="text-white text-xs font-bold">M</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#172d57" }}>
+              <span className="text-xs font-bold text-white">M</span>
             </div>
             <div>
-              <h1 className="text-sm font-bold text-gray-900">Ministry Assessment Tool</h1>
-              <p className="text-xs text-gray-400">Schools · Housing · Elder Care</p>
+              <h1 className="text-sm font-bold text-slate-950">Ministry Assessment Tool</h1>
+              <p className="text-xs text-slate-400">Schools · Housing · Elder Care</p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link href="/dashboard-preview" className="text-xs sm:text-sm px-3 py-2 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100">
-              Dashboard Preview
-            </Link>
-            <Link href="/intelligence" className="text-xs sm:text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">
-              Intelligence Console
-            </Link>
           </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {loading ? (
           <LoadingSkeleton />
         ) : result ? (
           <ResultsDashboard result={result} request={lastRequest!} onReset={handleReset} onRerun={handleSubmit} />
         ) : (
-          <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-10">
-              <h2 className="text-3xl font-bold text-gray-900 mb-3">Ministry Assessment Tool</h2>
-              <p className="text-gray-500 text-base leading-relaxed">
+          <div className="mx-auto max-w-2xl">
+            <div className="mb-10 text-center">
+              <h2 className="mb-3 text-3xl font-semibold tracking-tight text-slate-950">Ministry Assessment Tool</h2>
+              <p className="text-base leading-relaxed text-slate-500">
                 Select a ministry and analyze local demand, income fit, and competitive
                 landscape using Census demographics plus ministry-specific competitor data.
               </p>
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-              <div className="mb-4 inline-flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-                <button
-                  type="button"
-                  onClick={() => setLane("quick_screen")}
-                  className={`px-3 py-2 ${lane === "quick_screen" ? "bg-navy-700 text-white" : "bg-white text-gray-700"}`}
-                >
-                  Quick Screen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLane("deep_review")}
-                  className={`px-3 py-2 ${lane === "deep_review" ? "bg-navy-700 text-white" : "bg-white text-gray-700"}`}
-                >
-                  Deep Review
-                </button>
-              </div>
-              <p className="text-xs text-gray-500 mb-4">
-                {lane === "quick_screen"
-                  ? "Quick Screen prioritizes speed and directional repeatability."
-                  : "Deep Review supports expanded controls and board-ready export workflows."}
-              </p>
+            <div className="rounded-[28px] border border-slate-200 bg-white p-8 shadow-sm">
               <AnalysisForm
                 onSubmit={handleSubmit}
                 loading={loading}
@@ -198,11 +167,9 @@ export default function HomePage() {
               />
             </div>
 
-
-
             <div className="mt-8">
               {!DB_ENABLED && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                <p className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
                   Database-backed history is disabled in this environment (USE_DB=false). Local saved projects above remain available in this browser.
                 </p>
               )}
@@ -229,21 +196,33 @@ export default function HomePage() {
             </div>
 
             {error && (
-              <div className="mt-4 bg-red-50 border border-red-200 rounded-xl px-5 py-4 text-sm text-red-700">
+              <div className="mt-4 rounded-[28px] border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-700">
                 <strong>Error:</strong> {error}
               </div>
             )}
 
-            <div className="mt-10 grid grid-cols-3 gap-6 text-center text-sm text-gray-500">
-              <div><div className="text-2xl mb-2">📍</div><p className="font-semibold text-gray-700 mb-1">Geocode</p><p>Address is geocoded to county-level with the Census Bureau API</p></div>
-              <div><div className="text-2xl mb-2">📊</div><p className="font-semibold text-gray-700 mb-1">Assess</p><p>Population, income, and family data from ACS 5-year estimates</p></div>
-              <div><div className="text-2xl mb-2">🏫</div><p className="font-semibold text-gray-700 mb-1">Score</p><p>Module-aware scoring calibrated for schools, housing, or elder care</p></div>
+            <div className="mt-10 grid grid-cols-1 gap-6 text-center text-sm text-slate-500 sm:grid-cols-3">
+              <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-2 text-2xl">📍</div>
+                <p className="mb-1 font-semibold text-slate-800">Geocode</p>
+                <p>Address is geocoded to county-level with the Census Bureau API</p>
+              </div>
+              <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-2 text-2xl">📊</div>
+                <p className="mb-1 font-semibold text-slate-800">Assess</p>
+                <p>Population, income, and family data from ACS 5-year estimates</p>
+              </div>
+              <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-2 text-2xl">🏫</div>
+                <p className="mb-1 font-semibold text-slate-800">Score</p>
+                <p>Module-aware scoring calibrated for schools, housing, or elder care</p>
+              </div>
             </div>
           </div>
         )}
       </main>
 
-      <footer className="border-t border-gray-100 mt-16 py-6 text-center text-xs text-gray-400">
+      <footer className="mt-16 border-t border-slate-100 py-6 text-center text-xs text-slate-400">
         Data: US Census ACS 5-year estimates (2022) · NCES Private School Survey (2021–22) ·
         Catholic population: CARA state-level estimates
       </footer>
