@@ -290,6 +290,16 @@ class CompetitorSchool(BaseModel):
     reac_inspection_score: Optional[int] = None
 
 
+class DemographicHistoryPoint(BaseModel):
+    """One ACS vintage snapshot aggregated across the school catchment tracts."""
+    year: int
+    school_age_population: Optional[int] = None
+    total_population: Optional[int] = None
+    median_household_income: Optional[int] = None
+    families_with_children: Optional[int] = None
+    total_households: Optional[int] = None
+
+
 class DemographicTrend(BaseModel):
     school_age_pop_pct: Optional[float] = None   # % change in school-age pop, 2017→2022
     income_real_pct: Optional[float] = None      # inflation-adjusted % change in median income
@@ -603,6 +613,7 @@ class AnalysisResponse(BaseModel):
     decision_pathway: Optional[DecisionPathwayRecommendation] = None
     data_notes: List[str] = []
     trend: Optional[DemographicTrend] = None
+    history_series: List[DemographicHistoryPoint] = []
     population_gravity: Optional[PopulationGravityMap] = None
     enrollment_forecast: Optional[EnrollmentForecast] = None
     trace_id: Optional[str] = None

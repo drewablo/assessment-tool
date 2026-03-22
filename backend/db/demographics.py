@@ -10,7 +10,7 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import CensusTract, CensusTractHistory
-from db.queries import get_historical_tracts, get_tracts_by_county, get_tracts_by_state, get_tracts_in_catchment
+from db.queries import get_all_historical_tracts, get_historical_tracts, get_tracts_by_county, get_tracts_by_state, get_tracts_in_catchment
 from utils import bearing, direction_from_bearing
 
 logger = logging.getLogger("db.demographics")
@@ -90,7 +90,9 @@ async def aggregate_demographics(
         return _empty_demographics(state_fips)
 
     tract_geoids = [t.geoid for t in tracts if t.geoid]
-    historical_rows = await get_historical_tracts(session, tract_geoids, vintage="2017") if tract_geoids else []
+    all_historical_rows = await get_all_historical_tracts(session, tract_geoids) if tract_geoids else []
+    # Keep single-vintage lookup for backwards-compat callers that need just 2017 rows.
+    historical_rows = [r for r in all_historical_rows if r.acs_vintage == "2017"]
 
     # Simple summation for count fields, population-weighted for rates
     total_pop = 0
@@ -177,29 +179,53 @@ async def aggregate_demographics(
     if occupied > 0:
         owner_pct = round(owner_occupied / occupied * 100.0, 1)
 
-    historical_2017 = {}
-    if historical_rows:
-        hist_total_pop = sum(h.total_population or 0 for h in historical_rows)
-        hist_school_age = sum(h.population_5_17 or 0 for h in historical_rows)
-        hist_families = sum(h.families_with_own_children or 0 for h in historical_rows)
-        hist_households = sum(h.total_households or 0 for h in historical_rows)
-
-        weighted_hist_income = 0
-        weighted_hist_pop = 0
-        for h in historical_rows:
+    def _aggregate_vintage_rows(rows: list) -> dict:
+        """Aggregate a list of CensusTractHistory rows into a single vintage summary."""
+        total_pop = sum(h.total_population or 0 for h in rows)
+        school_age = sum(h.population_5_17 or 0 for h in rows)
+        families = sum(h.families_with_own_children or 0 for h in rows)
+        households = sum(h.total_households or 0 for h in rows)
+        weighted_income = 0
+        weighted_pop = 0
+        for h in rows:
             pop = h.total_population or 0
             income = h.median_household_income or 0
             if pop > 0 and income > 0:
-                weighted_hist_income += income * pop
-                weighted_hist_pop += pop
-
-        historical_2017 = {
-            "total_population": hist_total_pop,
-            "school_age_population": hist_school_age,
-            "families_with_children": hist_families,
-            "total_households": hist_households,
-            "median_household_income": int(weighted_hist_income / weighted_hist_pop) if weighted_hist_pop > 0 else None,
+                weighted_income += income * pop
+                weighted_pop += pop
+        med_income = int(weighted_income / weighted_pop) if weighted_pop > 0 else None
+        return {
+            # Keys match what compute_trend() expects for the 2017 side.
+            "school_age_pop": school_age,
+            "median_income": med_income,
+            "families_with_children": families,
+            # Extra fields for the history_series payload.
+            "total_population": total_pop,
+            "total_households": households,
+            "median_household_income": med_income,
         }
+
+    historical_2017 = {}
+    if historical_rows:
+        historical_2017 = _aggregate_vintage_rows(historical_rows)
+
+    # Build multi-vintage history series from all available ingested years.
+    history_series: list[dict] = []
+    if all_historical_rows:
+        from collections import defaultdict
+        rows_by_vintage: dict[str, list] = defaultdict(list)
+        for r in all_historical_rows:
+            rows_by_vintage[r.acs_vintage].append(r)
+        for vintage_year in sorted(rows_by_vintage.keys()):
+            agg = _aggregate_vintage_rows(rows_by_vintage[vintage_year])
+            history_series.append({
+                "year": int(vintage_year),
+                "school_age_population": agg["school_age_pop"],
+                "total_population": agg["total_population"],
+                "median_household_income": agg["median_household_income"],
+                "families_with_children": agg["families_with_children"],
+                "total_households": agg["total_households"],
+            })
 
     # Estimate Catholic percentage
     state_abbr = STATE_FIPS_TO_ABBR.get(state_fips, "")
@@ -353,6 +379,7 @@ async def aggregate_demographics(
         "private_school_enrolled": total_enrolled_private_k_12,
         "total_school_enrolled": total_enrolled_k_12,
         "historical_2017": historical_2017,
+        "history_series": history_series,
     }
 
 

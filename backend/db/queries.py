@@ -249,6 +249,16 @@ async def get_historical_tracts(
     return list(result.scalars().all())
 
 
+async def get_all_historical_tracts(
+    session: AsyncSession,
+    geoids: list[str],
+) -> list[CensusTractHistory]:
+    """Get all available historical vintage rows for a set of tract GEOIDs."""
+    stmt = select(CensusTractHistory).where(CensusTractHistory.geoid.in_(geoids))
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def get_nearby_schools(
     session: AsyncSession,
     lat: float,
