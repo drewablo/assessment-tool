@@ -204,7 +204,7 @@ async def test_dashboard_response_selects_intersecting_zips_not_seeded_fallbacks
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
 
@@ -240,7 +240,7 @@ async def test_dashboard_response_reports_cache_unavailable_without_synthetic_ge
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
 
@@ -277,7 +277,7 @@ async def test_dashboard_endpoint_returns_additive_payload(tmp_path, monkeypatch
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     async def _fake_geocode(_address: str):
         return {
@@ -439,7 +439,7 @@ def test_fallback_data_year():
         intersection_weights={"33901": 1.0},
     )
 
-    _, history_by_zip, data_year = dashboard_service._area_weighted_fallback(result, spatial)
+    _, history_by_zip, data_year, _ = dashboard_service._area_weighted_fallback(result, spatial)
 
     assert data_year == dashboard_service.DASHBOARD_DATA_YEAR
     assert sorted(history_by_zip["33901"]) == dashboard_service.DASHBOARD_HISTORICAL_YEARS
@@ -652,7 +652,7 @@ def test_build_projection_series_projects_non_flat_growth_with_multi_point_histo
 
 def test_build_housing_payload_includes_population_and_renter_time_series():
     result = _response("housing")
-    current_by_zip, history_by_zip, data_year = dashboard_service._area_weighted_fallback(
+    current_by_zip, history_by_zip, data_year, _ = dashboard_service._area_weighted_fallback(
         result,
         dashboard_service.DashboardSpatialContext(
             zip_codes=["33901", "33916"],
@@ -686,7 +686,7 @@ async def test_dashboard_response_for_elder_care_module(tmp_path, monkeypatch):
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
 
@@ -728,7 +728,7 @@ async def test_dashboard_response_for_housing_module(tmp_path, monkeypatch):
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
 
@@ -798,7 +798,7 @@ async def test_dashboard_response_with_per_zip_directory_format(tmp_path, monkey
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     monkeypatch.setattr(dashboard_service, "_load_db_aggregates", _fake_db)
 
@@ -853,7 +853,7 @@ async def test_dashboard_endpoint_elder_care_via_api(tmp_path, monkeypatch):
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     async def _fake_geocode(_address: str):
         return {
@@ -911,7 +911,7 @@ async def test_dashboard_endpoint_housing_via_api(tmp_path, monkeypatch):
     dashboard_service._load_zcta_cache.cache_clear()
 
     async def _fake_db(*_args, **_kwargs):
-        return {}, {}, None
+        return {}, {}, None, {}
 
     async def _fake_geocode(_address: str):
         return {
@@ -980,7 +980,7 @@ def test_area_weighted_fallback_uses_demographic_trend_for_history_backcast():
         intersection_weights={"33901": 1.0},
     )
 
-    current_by_zip, history_by_zip, data_year = dashboard_service._area_weighted_fallback(result, spatial)
+    current_by_zip, history_by_zip, data_year, _ = dashboard_service._area_weighted_fallback(result, spatial)
     series = dashboard_service._build_projection_series(
         {year: values.get("school_age_population", 0.0) for year, values in history_by_zip["33901"].items()},
         data_year,
