@@ -67,7 +67,7 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
   useEffect(() => {
     const zipKeys = Object.keys(currentZipDrilldowns);
     if (zipKeys.length === 0) return;
-    if (!(selectedZip in currentZipDrilldowns)) {
+    if (!selectedZip) {
       setSelectedZip(zipKeys[0]);
     }
   }, [currentZipDrilldowns, selectedZip]);
@@ -175,6 +175,15 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
                   requestAnimationFrame(() => {
                     drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                   });
+                } else {
+                  console.warn(
+                    `[Dashboard] ZIP ${zipCode} clicked but not found in drilldowns. Available keys:`,
+                    Object.keys(currentZipDrilldowns),
+                  );
+                  setSelectedZip(zipCode);
+                  requestAnimationFrame(() => {
+                    drilldownRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  });
                 }
               }}
               fileBaseName={`${config.slug}-choropleth`}
@@ -183,6 +192,7 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
               centerLabel={config.address}
               centerLat={config.centerLat}
               centerLon={config.centerLon}
+              radiusMiles={config.radiusMiles}
               boundaryOverlays={config.boundaryOverlays}
             />
 
@@ -190,8 +200,18 @@ export default function ModuleDashboardView({ config, embedded = false, backHref
               <div ref={drilldownRef}>
                 <ZipDrilldownCard data={zipData} defaultOpen />
               </div>
+            ) : selectedZip ? (
+              <div
+                ref={drilldownRef}
+                className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
+              >
+                No drilldown data available for ZIP {selectedZip}. This ZIP may have insufficient census tract coverage.
+              </div>
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm">
+              <div
+                ref={drilldownRef}
+                className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500 shadow-sm"
+              >
                 Select a ZIP on the map to open the drilldown card.
               </div>
             )}

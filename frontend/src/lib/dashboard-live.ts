@@ -382,6 +382,7 @@ export function toDashboardModuleConfig(
     address: payload.catchment.center.address,
     centerLat: payload.catchment.center.lat,
     centerLon: payload.catchment.center.lng,
+    radiusMiles: analysisResult?.catchment_mode === "radius" ? analysisResult.radius_miles : undefined,
     boundaryOverlays: (payload.catchment.boundary_overlays ?? undefined) as FeatureCollection | undefined,
     analysisResult: analysisResult ?? undefined,
     primaryLabel: payload.data.primary_label,

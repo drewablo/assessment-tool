@@ -13,6 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
+from shapely.affinity import scale
 from shapely.geometry import Point, shape
 from shapely.prepared import prep
 
@@ -49,7 +50,7 @@ ZCTA_CACHE_PATH = Path(os.getenv("ZCTA_CACHE_PATH", Path(__file__).resolve().par
 DASHBOARD_DATA_YEAR = int(os.getenv("DASHBOARD_DATA_YEAR", "2024"))
 DASHBOARD_PROJECTION_HORIZON = int(os.getenv("DASHBOARD_PROJECTION_HORIZON", "5"))
 DASHBOARD_MAX_ZIPS = int(os.getenv("DASHBOARD_MAX_ZIPS", "75"))
-DASHBOARD_MIN_ZIP_COVERAGE = float(os.getenv("DASHBOARD_MIN_ZIP_COVERAGE", "0.02"))
+DASHBOARD_MIN_ZIP_COVERAGE = float(os.getenv("DASHBOARD_MIN_ZIP_COVERAGE", "0.05"))
 DASHBOARD_HISTORICAL_YEARS = [2013, 2015, 2017, 2019, 2021]
 
 
@@ -173,6 +174,7 @@ def _load_features_for_zips(zip_codes: set[str]) -> dict[str, dict]:
     for zip_code in zip_codes:
         zip_file = ZCTA_CACHE_DIR / f"{zip_code}.json.gz"
         if not zip_file.exists():
+            logger.warning("ZCTA cache file missing for ZIP %s — will be excluded from dashboard", zip_code)
             continue
         try:
             with gzip.open(zip_file, "rt", encoding="utf-8") as fh:
@@ -227,7 +229,11 @@ def _catchment_geometry(result: AnalysisResponse):
             logger.warning("Unable to parse isochrone polygon for dashboard ZIP selection", exc_info=True)
 
     lat_delta, lon_delta = _approx_radius_degrees(result.lat, result.radius_miles)
-    geom = Point(result.lon, result.lat).buffer(max(lat_delta, lon_delta))
+    geom = scale(
+        Point(result.lon, result.lat).buffer(1.0),
+        xfact=lon_delta,
+        yfact=lat_delta,
+    )
     return geom, "radius_intersection"
 
 
@@ -272,7 +278,7 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
     candidate_features = _load_features_for_zips(candidate_zips)
 
     # Step 3: Shapely intersection only for the ~100 candidates
-    intersections: list[tuple[str, float]] = []
+    intersections: list[tuple[str, float, float]] = []
     for entry in bbox_candidates:
         feature = candidate_features.get(entry.zip_code)
         if not feature or not feature.get("geometry"):
@@ -289,29 +295,31 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
             overlap_area = 0.0
         if overlap_area <= 0:
             continue
-        intersections.append((entry.zip_code, overlap_area))
-
-    intersections.sort(key=lambda item: item[1], reverse=True)
-
-    zip_coverages: list[tuple[str, float]] = []
-    for zip_code, overlap_area in intersections:
-        feature = candidate_features.get(zip_code)
-        if not feature or not feature.get("geometry"):
-            continue
-        try:
-            zip_area = shape(feature["geometry"]).area
-        except Exception:
-            zip_area = overlap_area
+        zip_area = geom.area
         coverage = min(overlap_area / max(zip_area, 1e-12), 1.0)
-        if coverage >= DASHBOARD_MIN_ZIP_COVERAGE:
-            zip_coverages.append((zip_code, coverage))
+        intersections.append((entry.zip_code, overlap_area, coverage))
 
-    zip_coverages = zip_coverages[:DASHBOARD_MAX_ZIPS]
-    total_coverage = sum(coverage for _, coverage in zip_coverages) or 1.0
-    weights = {zip_code: coverage / total_coverage for zip_code, coverage in zip_coverages}
+    total_intersections = len(intersections)
+    intersections = [
+        (zip_code, overlap_area, coverage)
+        for zip_code, overlap_area, coverage in intersections
+        if coverage >= DASHBOARD_MIN_ZIP_COVERAGE
+    ]
+    filtered_count = total_intersections - len(intersections)
+    if filtered_count:
+        logger.info(
+            "Filtered %d ZCTAs below %.2f%% catchment coverage threshold",
+            filtered_count,
+            DASHBOARD_MIN_ZIP_COVERAGE * 100,
+        )
+
+    intersections.sort(key=lambda item: item[2], reverse=True)
+    intersections = intersections[:DASHBOARD_MAX_ZIPS]
+    total_coverage = sum(coverage for _, _, coverage in intersections) or 1.0
+    weights = {zip_code: coverage / total_coverage for zip_code, _, coverage in intersections}
 
     selected_features: list[dict[str, Any]] = []
-    for zip_code, _ in zip_coverages:
+    for zip_code, _, _ in intersections:
         feature = json.loads(json.dumps(candidate_features[zip_code]))
         props = feature.setdefault("properties", {})
         props["zipCode"] = zip_code
@@ -319,7 +327,7 @@ def _select_zcta_records(result: AnalysisResponse) -> DashboardSpatialContext:
         selected_features.append(feature)
 
     return DashboardSpatialContext(
-        zip_codes=[zip_code for zip_code, _ in zip_coverages],
+        zip_codes=[zip_code for zip_code, _, _ in intersections],
         feature_collection={"type": "FeatureCollection", "features": selected_features},
         geometry_source="census_zcta_cache",
         selection_method=selection_method,
