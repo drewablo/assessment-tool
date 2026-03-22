@@ -133,6 +133,7 @@ function ChoroplethMap({
       overlayRef.current?.remove();
       if (boundaryOverlays && boundaryOverlays.features.length > 0) {
         overlayRef.current = L.geoJSON(boundaryOverlays as GeoJsonObject, {
+          interactive: false,
           style: (feature) => {
             const isQCT = feature?.properties?.designation_type === "QCT";
             return {
@@ -142,11 +143,6 @@ function ChoroplethMap({
               fillColor: isQCT ? "#dc2626" : "#2563eb",
               fillOpacity: 0.08,
             };
-          },
-          onEachFeature: (feature, layer) => {
-            const dtype = feature.properties?.designation_type ?? "Unknown";
-            const name = feature.properties?.area_name ?? feature.properties?.geoid11 ?? "";
-            layer.bindTooltip(`${dtype}: ${name}`);
           },
         }).addTo(mapInstanceRef.current!);
       }
@@ -159,6 +155,7 @@ function ChoroplethMap({
           weight: 1.5,
           dashArray: "6 4",
           fillOpacity: 0,
+          interactive: false,
         }).addTo(mapInstanceRef.current);
       }
 
