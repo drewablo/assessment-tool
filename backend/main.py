@@ -63,8 +63,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_TTL = int(os.getenv("ANALYSIS_CACHE_TTL", "86400"))  # 24 hours default
 DEFAULT_RUN_MODE = os.getenv("ANALYSIS_RUN_MODE", "db_with_fallback")
 SNAPSHOT_TTL = int(os.getenv("ANALYSIS_SNAPSHOT_TTL", "86400"))
-CACHE_SCHEMA_VERSION = os.getenv("ANALYSIS_CACHE_SCHEMA_VERSION", "2026-03-senior-metrics-v2")
-DASHBOARD_CACHE_SCHEMA_VERSION = os.getenv("DASHBOARD_CACHE_SCHEMA_VERSION", "2026-03-dashboard-v1")
+CACHE_SCHEMA_VERSION = os.getenv("ANALYSIS_CACHE_SCHEMA_VERSION", "2026-03-zip-county-labels-v3")
+DASHBOARD_CACHE_SCHEMA_VERSION = os.getenv("DASHBOARD_CACHE_SCHEMA_VERSION", "2026-03-dashboard-v2")
 
 # Global Redis connection state
 _redis = None
