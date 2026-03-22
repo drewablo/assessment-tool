@@ -12,6 +12,7 @@ venv/
 # NCES data cache (downloaded at runtime, not committed)
 backend/data/*.csv
 backend/data/*.zip
+backend/data/*.json.gz
 
 # Node / Next.js
 node_modules/
