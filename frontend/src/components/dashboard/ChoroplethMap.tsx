@@ -27,6 +27,7 @@ interface Props {
   centerLabel?: string;
   centerLat?: number;
   centerLon?: number;
+  radiusMiles?: number;
   boundaryOverlays?: FeatureCollection;
 }
 
@@ -53,6 +54,7 @@ function ChoroplethMap({
   centerLabel,
   centerLat,
   centerLon,
+  radiusMiles,
   boundaryOverlays,
 }: Props) {
   const shellRef = useRef<HTMLDivElement>(null);
@@ -61,6 +63,7 @@ function ChoroplethMap({
   const layerRef = useRef<import("leaflet").GeoJSON | null>(null);
   const markerLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const overlayRef = useRef<import("leaflet").GeoJSON | null>(null);
+  const catchmentCircleRef = useRef<import("leaflet").Circle | null>(null);
   const metricRows = useMemo(
     () =>
       featureCollection.features.map((feature) => ({
@@ -140,6 +143,17 @@ function ChoroplethMap({
         }).addTo(mapInstanceRef.current!);
       }
 
+      catchmentCircleRef.current?.remove();
+      if (centerLat != null && centerLon != null && radiusMiles) {
+        catchmentCircleRef.current = L.circle([centerLat, centerLon], {
+          radius: radiusMiles * 1609.34,
+          color: "#475569",
+          weight: 1.5,
+          dashArray: "6 4",
+          fillOpacity: 0,
+        }).addTo(mapInstanceRef.current);
+      }
+
       // --- Competitor / facility markers ---
       markerLayerRef.current?.clearLayers();
       markerLayerRef.current = L.layerGroup().addTo(mapInstanceRef.current);
@@ -203,8 +217,9 @@ function ChoroplethMap({
       layerRef.current = null;
       markerLayerRef.current = null;
       overlayRef.current = null;
+      catchmentCircleRef.current = null;
     };
-  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon, boundaryOverlays]);
+  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon, radiusMiles, boundaryOverlays]);
 
   const isEmpty = featureCollection.features.length === 0;
 
