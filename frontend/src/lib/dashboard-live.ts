@@ -8,8 +8,8 @@ export function dashboardCompetitors(analysisResult?: AnalysisResponse | null) {
   return analysisResult?.competitor_schools ?? analysisResult?.housing_projects ?? [];
 }
 
-export function shouldShowCompetitorTable(activeSidebar: string, tableVariant: string | undefined, competitorCount: number) {
-  return tableVariant !== "partner" && ["competitors", "market_landscape", "existing_resources", "enrollment"].includes(activeSidebar) && competitorCount > 0;
+export function shouldShowCompetitorTable(activeSidebar: string, activeTab: string, tableVariant: string | undefined, competitorCount: number) {
+  return tableVariant !== "partner" && competitorCount > 0 && (activeSidebar === "competitors" || ["competitor_overlap", "competitor_table", "project_table"].includes(activeTab));
 }
 
 function requestFields(request: AnalysisRequest): ParameterBarField[] {
@@ -46,15 +46,29 @@ function sidebarViewsForModule(
 
   if (slug === "schools") {
     return {
+      market_overview: {
+        title: "Market Overview",
+        description: "Population, income, and addressable-market context across the catchment.",
+        tabs: [
+          { key: "summary", label: "Summary" },
+          { key: "distribution", label: "Distribution" },
+          { key: "projections", label: "Projections" },
+          { key: "map_view", label: "Map View" },
+          { key: "drilldown", label: "ZIP Drilldown" },
+        ],
+        metricOptions: [
+          { key: "schoolAgePopulation", label: "School-Age Population" },
+          { key: "familiesWithChildren", label: "Families with Children" },
+          { key: "medianFamilyIncome", label: "Median Family Income", format: "currency" as const },
+        ],
+      },
       affordability: {
         title: "Affordability",
         description: "Tuition fit, aid pressure, and the depth of high-income families across the catchment.",
         tabs: [
           { key: "summary", label: "Summary" },
           { key: "median_income", label: "Median Income" },
-          { key: "high_income", label: "High Income ($200K+)" },
           { key: "distribution", label: "Distribution" },
-          { key: "change_average", label: "Change in Average" },
         ],
         distributionReferenceLine: {
           value: 1000,
@@ -64,12 +78,10 @@ function sidebarViewsForModule(
       },
       student_body: {
         title: "Student Body",
-        description: "School-age population trend and Catholic-affiliation context alongside catchment enrollment comparison.",
+        description: "School-age population trend and catchment enrollment comparison for student body planning.",
         tabs: [
-          { key: "age_cohorts", label: "Age Cohorts" },
           { key: "population_trend", label: "Population Trend" },
           { key: "catchment_enrollment", label: "Catchment vs. Enrollment" },
-          { key: "catholic_affiliation", label: "Catholic Affiliation" },
         ],
         callout: {
           tone: "info",
@@ -180,11 +192,51 @@ function sidebarViewsForModule(
           },
         ],
       },
+      competitors: {
+        title: "Competitors",
+        description: "Nearby private schools, Catholic-school density, and enrollment pressure context.",
+        tabs: [
+          { key: "competitor_map", label: "Competitor Map" },
+          { key: "competitor_table", label: "Competitor Table" },
+        ],
+        metricOptions: [
+          { key: "competitorCount", label: "Nearby Competitors" },
+          { key: "schoolAgePopulation", label: "School-Age Population" },
+        ],
+      },
     };
   }
 
   if (slug === "elder-care") {
     return {
+      community_profile: {
+        title: "Community Profile",
+        description: "Senior population and income context across the current catchment.",
+        tabs: [
+          { key: "summary", label: "Summary" },
+          { key: "distribution", label: "Distribution" },
+          { key: "projections", label: "Projections" },
+          { key: "map_view", label: "Map View" },
+          { key: "drilldown", label: "ZIP Drilldown" },
+        ],
+        metricOptions: [
+          { key: "seniors65Plus", label: "Seniors 65+" },
+          { key: "seniors75Plus", label: "Seniors 75+" },
+          { key: "medianSeniorIncome", label: "Senior Household Income", format: "currency" as const },
+        ],
+      },
+      market_landscape: {
+        title: "Market Landscape",
+        description: "Facilities, ownership, ratings, and local capacity context by ZIP.",
+        tabs: [
+          { key: "competitor_map", label: "Facility Map" },
+          { key: "competitor_table", label: "Facility Table" },
+        ],
+        metricOptions: [
+          { key: "facilityCount", label: "Facilities" },
+          { key: "seniors75Plus", label: "Seniors 75+" },
+        ],
+      },
       partnership_viability: {
         title: "Partnership Viability",
         description: "Nearby operators, their ownership profile, and visible quality signals.",
@@ -199,7 +251,6 @@ function sidebarViewsForModule(
         description: "Elder-care projections with a cohort-breakdown lens and care-planning takeaways.",
         tabs: [
           { key: "cohort_breakdown", label: "Cohort Breakdown" },
-          { key: "care_implications", label: "Care Implications" },
         ],
         callout: {
           tone: "info",
@@ -376,6 +427,27 @@ function sidebarViewsForModule(
           },
         },
       },
+      need_assessment: {
+        title: "Need Assessment",
+        description: "Burdened and HUD-eligible households by ZIP, with map and drilldown access.",
+        tabs: [
+          { key: "summary", label: "Summary" },
+          { key: "distribution", label: "Distribution" },
+          { key: "map_view", label: "Map View" },
+          { key: "drilldown", label: "ZIP Drilldown" },
+        ],
+        metricOptions: [
+          { key: "costBurdenedHouseholds", label: "Cost-Burdened Households" },
+          { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
+          { key: "costBurdenRate", label: "Cost-Burden Rate", format: "percent" as const },
+        ],
+        trendTitle: "Housing Need Snapshot",
+        trendSubtitle: "Burdened renter households and HUD-eligible households summarize the depth of immediate affordable-housing demand.",
+        trendSeries: [
+          { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+          { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+        ],
+      },
       existing_resources: {
         title: "Existing Resources",
         description: "Nearby subsidized inventory, approximate supply gap, and QCT/DDA context.",
@@ -383,7 +455,6 @@ function sidebarViewsForModule(
           { key: "subsidized_map", label: "Subsidized Housing Map" },
           { key: "project_table", label: "Project Table" },
           { key: "supply_gap", label: "Supply Gap" },
-          { key: "pipeline", label: "Pipeline" },
         ],
         callout: {
           tone: "info",
