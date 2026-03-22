@@ -64,6 +64,13 @@ function ChoroplethMap({
   const markerLayerRef = useRef<import("leaflet").LayerGroup | null>(null);
   const overlayRef = useRef<import("leaflet").GeoJSON | null>(null);
   const catchmentCircleRef = useRef<import("leaflet").Circle | null>(null);
+
+  // Stable refs for values that should NOT trigger map teardown/rebuild
+  const onZipSelectRef = useRef(onZipSelect);
+  onZipSelectRef.current = onZipSelect;
+  const selectedZipRef = useRef(selectedZip);
+  selectedZipRef.current = selectedZip;
+
   const metricRows = useMemo(
     () =>
       featureCollection.features.map((feature) => ({
@@ -74,6 +81,7 @@ function ChoroplethMap({
     [featureCollection.features, metric.key, metric.label],
   );
 
+  // --- Main effect: build map, layers, markers (only when data/metric/competitors change) ---
   useEffect(() => {
     let mounted = true;
 
@@ -101,8 +109,8 @@ function ChoroplethMap({
           const raw = Number(feature?.properties?.[metric.key]);
           const zip = String(feature?.properties?.zipCode ?? feature?.properties?.zip ?? "");
           return {
-            color: selectedZip === zip ? "#0f172a" : "#ffffff",
-            weight: selectedZip === zip ? 2.5 : 1.2,
+            color: selectedZipRef.current === zip ? "#0f172a" : "#ffffff",
+            weight: selectedZipRef.current === zip ? 2.5 : 1.2,
             fillColor: getColor(raw, min, max),
             fillOpacity: 0.72,
           };
@@ -112,7 +120,7 @@ function ChoroplethMap({
           const label = feature.properties?.name ?? zip;
           const value = Number(feature.properties?.[metric.key]);
           layer.bindTooltip(`${label}: ${formatDashboardValue(value, metric.format)}`);
-          layer.on("click", () => onZipSelect?.(zip));
+          layer.on("click", () => onZipSelectRef.current?.(zip));
         },
       }).addTo(mapInstanceRef.current);
 
@@ -219,7 +227,23 @@ function ChoroplethMap({
       overlayRef.current = null;
       catchmentCircleRef.current = null;
     };
-  }, [featureCollection, metric, onZipSelect, selectedZip, competitors, ministryType, centerLabel, centerLat, centerLon, radiusMiles, boundaryOverlays]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featureCollection, metric, competitors, ministryType, centerLabel, centerLat, centerLon, radiusMiles, boundaryOverlays]);
+
+  // --- Lightweight effect: update selected-ZIP border styling without rebuilding the map ---
+  useEffect(() => {
+    if (!layerRef.current) return;
+    layerRef.current.eachLayer((layer) => {
+      const feature = (layer as import("leaflet").GeoJSON & { feature?: GeoJSON.Feature }).feature;
+      if (!feature) return;
+      const zip = String(feature.properties?.zipCode ?? feature.properties?.zip ?? "");
+      const isSelected = selectedZip === zip;
+      (layer as import("leaflet").Path).setStyle({
+        color: isSelected ? "#0f172a" : "#ffffff",
+        weight: isSelected ? 2.5 : 1.2,
+      });
+    });
+  }, [selectedZip]);
 
   const isEmpty = featureCollection.features.length === 0;
 

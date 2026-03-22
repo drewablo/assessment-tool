@@ -48,7 +48,7 @@ function sidebarViewsForModule(
     return {
       affordability: {
         title: "Affordability",
-        description: "Wave 1 schools work starts with tuition fit, aid pressure, and the depth of high-income families across the catchment.",
+        description: "Tuition fit, aid pressure, and the depth of high-income families across the catchment.",
         tabs: [
           { key: "summary", label: "Summary" },
           { key: "median_income", label: "Median Income" },
@@ -64,7 +64,7 @@ function sidebarViewsForModule(
       },
       student_body: {
         title: "Student Body",
-        description: "Wave 2 begins with school-age population trend and Catholic-affiliation context while a richer comparison view waits on client enrollment inputs.",
+        description: "School-age population trend and Catholic-affiliation context alongside catchment enrollment comparison.",
         tabs: [
           { key: "age_cohorts", label: "Age Cohorts" },
           { key: "population_trend", label: "Population Trend" },
@@ -82,7 +82,7 @@ function sidebarViewsForModule(
           { key: "medianFamilyIncome", label: "Median Family Income", format: "currency" as const },
         ],
         trendTitle: "School-Age Population Trend",
-        trendSubtitle: "This Wave 2 slice reuses the live school-age and family trend series while cohort-band payload work remains outstanding.",
+        trendSubtitle: "School-age and family trend series provide the baseline for student body context.",
         trendSeries: [
           { key: "schoolAgePopulation", label: "School-Age Population", color: "#7c3aed" },
           { key: "familiesWithChildren", label: "Families with Children", color: "#2563eb" },
@@ -123,7 +123,7 @@ function sidebarViewsForModule(
       },
       enrollment: {
         title: "Enrollment",
-        description: "Wave 3 begins with market-size and competitor-overlap framing while the interactive scenario modeler remains blocked on design review.",
+        description: "Market-size and competitor-overlap framing with an interactive enrollment scenario modeler.",
         tabs: [
           { key: "market_size", label: "Market Size" },
           { key: "competitor_overlap", label: "Competitor Overlap" },
@@ -142,7 +142,7 @@ function sidebarViewsForModule(
         trendTitle: "Addressable Market vs. Reference Enrollment",
         trendSubtitle: "Use current addressable-market depth and nearby competitor counts to judge how aggressive the initial enrollment target should be.",
         distributionTitle: "Enrollment Planning Context",
-        distributionSubtitle: "This first Wave 3 view summarizes the addressable market and benchmark enrollment size while scenario modeling remains blocked.",
+        distributionSubtitle: "Addressable market and benchmark enrollment size provide context for scenario planning.",
         distributionPrimaryLabel: "Current",
         distributionComparisonLabel: "Directional target",
         distributionData: [
@@ -187,7 +187,7 @@ function sidebarViewsForModule(
     return {
       partnership_viability: {
         title: "Partnership Viability",
-        description: "Wave 1 elder-care work centers on nearby operators, their ownership profile, and visible quality signals.",
+        description: "Nearby operators, their ownership profile, and visible quality signals.",
         tabs: [
           { key: "service_map", label: "Service Map" },
           { key: "potential_partners", label: "Potential Partners" },
@@ -196,7 +196,7 @@ function sidebarViewsForModule(
       },
       projections: {
         title: "Projections",
-        description: "Wave 2 strengthens elder-care projections with a cohort-breakdown lens and care-planning takeaways.",
+        description: "Elder-care projections with a cohort-breakdown lens and care-planning takeaways.",
         tabs: [
           { key: "cohort_breakdown", label: "Cohort Breakdown" },
           { key: "care_implications", label: "Care Implications" },
@@ -256,7 +256,7 @@ function sidebarViewsForModule(
     return {
       community_profile: {
         title: "Community Profile",
-        description: "Wave 1 folds demographic trends into Community Profile so population, tenure, and burden context stay together.",
+        description: "Population, tenure, poverty, and housing-need trend context.",
         tabs: [
           { key: "population_trend", label: "Population Trend" },
           { key: "renter_owner", label: "Renter vs. Owner" },
@@ -292,10 +292,93 @@ function sidebarViewsForModule(
             detail: "Estimated households below 60% of area median income.",
           },
         ],
+        tabViews: {
+          population_trend: {
+            trendTitle: "Population & Household Trends",
+            trendSubtitle: "Total population and renter household counts provide the demographic baseline for housing demand assessment.",
+            trendSeries: [
+              { key: "totalPopulation", label: "Total Population", color: "#6366f1" },
+              { key: "renterHouseholds", label: "Renter Households", color: "#16a34a" },
+            ],
+          },
+          renter_owner: {
+            trendTitle: "Renter vs. Owner Tenure",
+            trendSubtitle: "Renter household share relative to total households shows where housing pressure is concentrated.",
+            trendSeries: [
+              { key: "renterHouseholds", label: "Renter Households", color: "#16a34a" },
+            ],
+            highlightCards: [
+              {
+                label: "Renter households",
+                value: `${Math.round(demographics?.renter_households ?? 0).toLocaleString()}`,
+                detail: "Current renter households in the catchment.",
+              },
+              {
+                label: "Owner-occupied",
+                value: demographics?.owner_occupied_pct != null ? `${(demographics.owner_occupied_pct * 100).toFixed(1)}%` : "N/A",
+                detail: "Share of households that are owner-occupied.",
+              },
+              {
+                label: "Total households",
+                value: `${Math.round(demographics?.total_households ?? 0).toLocaleString()}`,
+                detail: "Total households in the catchment.",
+              },
+            ],
+          },
+          age_distribution: {
+            trendTitle: "Age Cohort Trends",
+            trendSubtitle: "Population age structure helps identify current and future housing demand across cohorts.",
+            trendSeries: [
+              { key: "totalPopulation", label: "Total Population", color: "#6366f1" },
+            ],
+            highlightCards: [
+              {
+                label: "Total population",
+                value: `${Math.round(demographics?.total_population ?? 0).toLocaleString()}`,
+                detail: "Current total population within the analysis catchment.",
+              },
+              {
+                label: "Seniors 65+",
+                value: `${Math.round(demographics?.seniors_65_plus ?? 0).toLocaleString()}`,
+                detail: "Current senior population in the catchment.",
+              },
+              {
+                label: "Under 18",
+                value: `${Math.round(demographics?.population_under_18 ?? 0).toLocaleString()}`,
+                detail: "Current population under 18 in the catchment.",
+              },
+            ],
+          },
+          poverty_rate: {
+            trendTitle: "Cost Burden & Affordability",
+            trendSubtitle: "Cost-burdened renter households and HUD-eligible counts frame the depth of housing affordability need.",
+            trendSeries: [
+              { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+              { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+            ],
+            highlightCards: [
+              {
+                label: "Cost-burdened renters",
+                value: `${Math.round(demographics?.cost_burdened_renter_households ?? 0).toLocaleString()}`,
+                detail: "Renter households spending 30%+ of income on housing.",
+              },
+              {
+                label: "HUD-eligible",
+                value: `${Math.round(demographics?.hud_eligible_households ?? 0).toLocaleString()}`,
+                detail: "Estimated households below 60% of area median income.",
+              },
+              {
+                label: "Median income",
+                value: `$${Math.round(demographics?.median_household_income ?? 0).toLocaleString()}`,
+                detail: "Median household income across the catchment.",
+              },
+            ],
+          },
+        },
       },
       existing_resources: {
         title: "Existing Resources",
-        description: "Wave 2 starts surfacing nearby subsidized inventory, approximate supply gap, and QCT/DDA context while the boundary overlay remains in design review.",
+        description: "Nearby subsidized inventory, approximate supply gap, and QCT/DDA context.",
         tabs: [
           { key: "subsidized_map", label: "Subsidized Housing Map" },
           { key: "project_table", label: "Project Table" },
@@ -313,7 +396,7 @@ function sidebarViewsForModule(
           { key: "renterHouseholds", label: "Renter Households" },
         ],
         trendTitle: "Existing Subsidized Supply vs. Need",
-        trendSubtitle: "The current Wave 2 slice contrasts visible affordability pressure with eligible-household depth while overlay and pipeline work remain pending.",
+        trendSubtitle: "Visible affordability pressure contrasted with eligible-household depth across the catchment.",
         trendSeries: [
           { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
           { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },

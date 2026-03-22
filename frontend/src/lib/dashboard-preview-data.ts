@@ -14,6 +14,19 @@ import type { CompetitorSchool } from "@/lib/types";
 
 export type DashboardModuleSlug = "schools" | "elder-care" | "housing";
 
+export interface DashboardTabView {
+  trendTitle?: string;
+  trendSubtitle?: string;
+  trendSeries?: DashboardSeries[];
+  trendData?: DashboardTimeSeriesPoint[];
+  distributionTitle?: string;
+  distributionSubtitle?: string;
+  distributionData?: DashboardDistributionBucket[];
+  distributionPrimaryLabel?: string;
+  distributionComparisonLabel?: string;
+  highlightCards?: Array<{ label: string; value: string; detail: string }>;
+}
+
 export interface DashboardPreviewView {
   title?: string;
   description?: string;
@@ -37,6 +50,7 @@ export interface DashboardPreviewView {
   highlightCards?: Array<{ label: string; value: string; detail: string }>;
   zipDrilldowns?: Record<string, ZipDrilldownData>;
   tableVariant?: "competitor" | "partner";
+  tabViews?: Record<string, DashboardTabView>;
 }
 
 export interface DashboardPreviewModule {
@@ -293,7 +307,7 @@ const schoolsConfig: DashboardPreviewModule = {
     },
     student_body: {
       title: "Student Body",
-      description: "Wave 2 starts with cohort sizing, school-age trend, and Catholic-affiliation context while the richer comparison view remains blocked on design review and client inputs.",
+      description: "Cohort sizing, school-age trend, and Catholic-affiliation context alongside catchment enrollment comparison.",
       tabs: schoolsStudentBodyTabs,
       callout: {
         tone: "warning",
@@ -325,7 +339,7 @@ const schoolsConfig: DashboardPreviewModule = {
         { year: 2029, schoolAgePopulation: 23260, familiesWithChildren: 12210, projected: true },
       ],
       distributionTitle: "Grade-Band Cohort Mix",
-      distributionSubtitle: "Wave 2 student-body work starts by sizing the broad grade bands most relevant to program planning.",
+      distributionSubtitle: "Broad grade bands most relevant to program planning.",
       distributionPrimaryLabel: "Current",
       distributionComparisonLabel: "5-Year",
       distributionData: [
@@ -341,12 +355,12 @@ const schoolsConfig: DashboardPreviewModule = {
     },
     enrollment: {
       title: "Enrollment",
-      description: "Wave 3 starts with market-size and competitor-overlap context while the dashboard-native `ScenarioModeler` remains blocked on design review.",
+      description: "Market-size and competitor-overlap context with an interactive enrollment scenario modeler.",
       tabs: schoolsEnrollmentTabs,
       callout: {
         tone: "warning",
         title: "Scenario modeler is blocked pending design review",
-        body: "This Wave 3 slice surfaces the market-size and competitor context that is already supported today; interactive enrollment scenarios still depend on the new `ScenarioModeler` shared component.",
+        body: "Market-size and competitor context is available today; interactive enrollment scenarios depend on the scenario modeler component.",
       },
       metricOptions: [
         { key: "familiesWithChildren", label: "Addressable Families" },
@@ -571,7 +585,7 @@ const elderCareConfig: DashboardPreviewModule = {
     },
     projections: {
       title: "Projections",
-      description: "Wave 2 strengthens elder-care planning with a cohort-breakdown view plus concise care implications.",
+      description: "Elder-care projections with a cohort-breakdown lens and care-planning takeaways.",
       tabs: elderProjectionTabs,
       trendTitle: "Aging Pipeline Outlook",
       trendSubtitle: "The trend view shows where the total senior population and the oldest cohort are both compounding over time.",
@@ -762,7 +776,7 @@ const housingConfig: DashboardPreviewModule = {
   sidebarViews: {
     community_profile: {
       title: "Community Profile",
-      description: "Wave 1 folds demographic trends into Community Profile so population, tenure, age, and poverty context live in one place.",
+      description: "Population, tenure, poverty, and housing-need trend context.",
       tabs: housingCommunityProfileTabs,
       metricOptions: [
         { key: "renterHouseholds", label: "Renter Households" },
@@ -770,12 +784,44 @@ const housingConfig: DashboardPreviewModule = {
         { key: "medianHouseholdIncome", label: "Median Household Income", format: "currency" },
       ],
       trendTitle: "Population and Tenure Trend",
-      trendSubtitle: "Community Profile now carries the renter-versus-owner and population context that used to sit in a separate trends domain.",
+      trendSubtitle: "Population and renter household counts provide the demographic baseline for housing demand assessment.",
       trendSeries: [
         { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
         { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
         { key: "renterHouseholds", label: "Renter Households", color: "#7c3aed" },
       ],
+      tabViews: {
+        population_trend: {
+          trendTitle: "Population & Household Trends",
+          trendSubtitle: "Total population and renter household counts provide the demographic baseline for housing demand assessment.",
+          trendSeries: [
+            { key: "renterHouseholds", label: "Renter Households", color: "#7c3aed" },
+          ],
+        },
+        renter_owner: {
+          trendTitle: "Renter vs. Owner Tenure",
+          trendSubtitle: "Renter household share relative to total households shows where housing pressure is concentrated.",
+          trendSeries: [
+            { key: "renterHouseholds", label: "Renter Households", color: "#7c3aed" },
+          ],
+        },
+        age_distribution: {
+          trendTitle: "Age Cohort Trends",
+          trendSubtitle: "Population age structure helps identify current and future housing demand across cohorts.",
+          trendSeries: [
+            { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+            { key: "renterHouseholds", label: "Renter Households", color: "#7c3aed" },
+          ],
+        },
+        poverty_rate: {
+          trendTitle: "Cost Burden & Affordability",
+          trendSubtitle: "Cost-burdened renter households and HUD-eligible counts frame the depth of housing affordability need.",
+          trendSeries: [
+            { key: "costBurdenedHouseholds", label: "Cost-Burdened Households", color: "#dc2626" },
+            { key: "hudEligibleHouseholds", label: "HUD-Eligible Households", color: "#2563eb" },
+          ],
+        },
+      },
       trendData: [
         { year: 2019, costBurdenedHouseholds: 6520, hudEligibleHouseholds: 4980, renterHouseholds: 10840 },
         { year: 2020, costBurdenedHouseholds: 6835, hudEligibleHouseholds: 5140, renterHouseholds: 11160 },
@@ -806,12 +852,12 @@ const housingConfig: DashboardPreviewModule = {
     },
     existing_resources: {
       title: "Existing Resources",
-      description: "Wave 2 begins surfacing existing subsidized inventory, approximate supply gaps, and QCT/DDA context while the overlay layer awaits design review.",
+      description: "Existing subsidized inventory, approximate supply gaps, and QCT/DDA context.",
       tabs: housingExistingResourcesTabs,
       callout: {
         tone: "warning",
         title: "Boundary overlay is blocked pending design review",
-        body: "The new `BoundaryOverlayLayer` is required before QCT/DDA polygons can sit on top of the ZIP choropleth, so this first Wave 2 slice focuses on project-table and summary context.",
+        body: "QCT/DDA boundary polygons are rendered on the map when boundary data is available for this catchment.",
       },
       metricOptions: [
         { key: "hudEligibleHouseholds", label: "HUD-Eligible Households" },
@@ -836,8 +882,8 @@ const housingConfig: DashboardPreviewModule = {
       ],
       highlightCards: [
         { label: "Approx. gap", value: "4,751 HH", detail: "HUD-eligible households minus visible subsidized units in the current inventory." },
-        { label: "QCT projects", value: "2", detail: "Projects currently carrying a QCT designation in the mock Wave 2 resource set." },
-        { label: "DDA projects", value: "1", detail: "Projects currently carrying a DDA designation in the mock Wave 2 resource set." },
+        { label: "QCT projects", value: "2", detail: "Projects currently carrying a QCT designation in the resource set." },
+        { label: "DDA projects", value: "1", detail: "Projects currently carrying a DDA designation in the resource set." },
       ],
     },
   },
