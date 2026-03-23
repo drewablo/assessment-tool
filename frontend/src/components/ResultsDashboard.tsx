@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { ReactNode, useState } from "react";
 import { Download, FileText, AlertCircle, RefreshCw, CheckCircle2, XCircle, Network } from "lucide-react";
-import { AnalysisResponse, AnalysisRequest } from "@/lib/types";
+import { AnalysisResponse, AnalysisRequest, MinistryType, FeasibilityScore } from "@/lib/types";
 import ScoreGauge from "./ScoreGauge";
 import MetricCard from "./MetricCard";
 import BenchmarkPanel from "./BenchmarkPanel";
@@ -37,6 +37,131 @@ const recommendationColors: Record<string, string> = {
 };
 
 type Toast = { id: number; type: "success" | "error"; message: string };
+
+function scoringMethodology(ministryType: MinistryType, w: FeasibilityScore): string {
+  switch (ministryType) {
+    case "elder_care":
+      return (
+        `Five market factors: Target Population (${w.market_size.weight}%), ` +
+        `Income Fit (${w.income.weight}%), Bed Saturation (${w.competition.weight}%), ` +
+        `Isolation Signal (${w.family_density.weight}%)` +
+        `${w.occupancy ? `, Market Occupancy (${w.occupancy.weight}%)` : ""}. ` +
+        `Target population uses seniors 75+ in market mode or vulnerable seniors ` +
+        `(living alone or below 200% poverty) in mission mode. ` +
+        `Bed saturation measures gravity-weighted competitor beds relative to the target ` +
+        `senior population — lower ratios indicate underserved markets. ` +
+        `Isolation signal uses the share of seniors living alone as a proxy for gaps in ` +
+        `family support networks. Income scoring is inverted in mission mode to prioritize ` +
+        `communities with greater need for affordable or subsidized care.`
+      );
+    case "housing":
+      return (
+        `Four market factors: Cost-Burdened Households (${w.market_size.weight}%), ` +
+        `Income Need (${w.income.weight}%), LIHTC Saturation (${w.competition.weight}%), ` +
+        `Renter Burden Intensity (${w.family_density.weight}%). ` +
+        `Cost-burdened households are renters spending more than 30% of income on housing ` +
+        `(the standard HUD threshold). Income is scored inversely — lower median income ` +
+        `indicates higher need and yields a higher score, reflecting the housing ministry's ` +
+        `focus on underserved communities. LIHTC saturation measures existing affordable ` +
+        `housing supply relative to need; lower saturation means more opportunity. ` +
+        `Renter burden intensity captures the share of all renters who are cost burdened.`
+      );
+    default:
+      return (
+        `Four market factors: Market Size (${w.market_size.weight}%), ` +
+        `Income Level (${w.income.weight}%), Competition (${w.competition.weight}%), ` +
+        `Family Density (${w.family_density.weight}%). ` +
+        `Competition weights demand-validation at 60% and saturation at 40%, reflecting ` +
+        `NCEA 2024-2025 data showing 39.3% of Catholic schools have waiting lists — ` +
+        `existing school presence is more often a demand signal than market saturation. ` +
+        `Income score includes a bonus for states with established parental choice programs ` +
+        `(NCEA 2024-2025: 18% of students nationally; 50%+ in FL, OH, IN, OK, IA, AZ). ` +
+        `Enrollment benchmarks reference NCEA 2024-2025 Exhibit 6: modal Catholic school ` +
+        `enrolls 150–299 students (38.6% of schools); microschool threshold is <150 students.`
+      );
+  }
+}
+
+interface StageDescription {
+  title: string;
+  label: string;
+  description: string;
+  borderColor: string;
+  badgeColor: string;
+  titleColor: string;
+}
+
+function stageDescriptions(ministryType: MinistryType): StageDescription[] {
+  const stage1Colors = { borderColor: "border-green-200", badgeColor: "bg-green-600", titleColor: "text-green-800" };
+  const stage2Colors = { borderColor: "border-yellow-200", badgeColor: "bg-yellow-500", titleColor: "text-yellow-800" };
+  const stage3Colors = { borderColor: "border-blue-200", badgeColor: "bg-blue-600", titleColor: "text-blue-800" };
+
+  switch (ministryType) {
+    case "elder_care":
+      return [
+        {
+          ...stage1Colors,
+          title: "Market Feasibility",
+          label: "This tool.",
+          description: "Senior demographics, competitor bed supply, income fit, and isolation signals. Indicates whether local conditions support a viable elder care ministry.",
+        },
+        {
+          ...stage2Colors,
+          title: "Operational Economics",
+          label: "Next step.",
+          description: "Occupancy sustainability, staffing ratios, payer mix, operating margins, and Medicaid/Medicare reimbursement viability.",
+        },
+        {
+          ...stage3Colors,
+          title: "Local Validation",
+          label: "Before committing.",
+          description: "Community needs assessment, referral network outreach, licensing requirements, diocesan alignment, and family engagement sessions.",
+        },
+      ];
+    case "housing":
+      return [
+        {
+          ...stage1Colors,
+          title: "Market Feasibility",
+          label: "This tool.",
+          description: "Cost-burdened households, income need, LIHTC saturation, and renter burden intensity. Indicates whether local conditions support an affordable housing development.",
+        },
+        {
+          ...stage2Colors,
+          title: "Project Economics",
+          label: "Next step.",
+          description: "Occupancy projections, operating cost per unit, debt service coverage, subsidy dependency, and capital reserve adequacy.",
+        },
+        {
+          ...stage3Colors,
+          title: "Local Validation",
+          label: "Before committing.",
+          description: "Community engagement, local zoning review, housing authority coordination, diocesan alignment, and neighborhood listening sessions.",
+        },
+      ];
+    default:
+      return [
+        {
+          ...stage1Colors,
+          title: "Market Feasibility",
+          label: "This tool.",
+          description: "Census demographics, competitor presence, income levels, and family density. Indicates whether local conditions can support continued operation.",
+        },
+        {
+          ...stage2Colors,
+          title: "Institutional Economics",
+          label: "Next step.",
+          description: "Enrollment sustainability, tuition discount rate, operating margin, subsidy dependency, and mission fit for ongoing operations.",
+        },
+        {
+          ...stage3Colors,
+          title: "Local Validation",
+          label: "Before committing.",
+          description: "Sponsor and community engagement, feeder-school outreach, parent demand surveys, diocesan alignment, and local listening sessions.",
+        },
+      ];
+  }
+}
 
 function InfoFooterCard({
   label,
@@ -546,49 +671,22 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
                 should only follow Stage 3 local validation.
               </p>
               <p className="mt-3 border-t border-slate-100 pt-3 text-sm leading-relaxed text-slate-500">
-                <strong className="text-slate-800">Scoring methodology</strong> · Four market factors: Market
-                Size ({w.market_size.weight}%), Income Level ({w.income.weight}%), Competition ({w.competition.weight}%),
-                Family Density ({w.family_density.weight}%). Competition weights demand-validation at 60% and
-                saturation at 40%, reflecting NCEA 2024-2025 data showing 39.3% of Catholic schools have waiting
-                lists — existing school presence is more often a demand signal than market saturation. Income
-                score includes a bonus for states with established parental choice programs (NCEA 2024-2025:
-                18% of students nationally; 50%+ in FL, OH, IN, OK, IA, AZ). Enrollment benchmarks reference
-                NCEA 2024-2025 Exhibit 6: modal Catholic school enrolls 150–299 students (38.6% of schools);
-                microschool threshold is &lt;150 students.
+                <strong className="text-slate-800">Scoring methodology</strong> · {scoringMethodology(result.ministry_type, w)}
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-[24px] border border-green-200 bg-white p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">1</span>
-                  <span className="text-sm font-semibold text-green-800">Market Feasibility</span>
+              {stageDescriptions(result.ministry_type).map((stage, i) => (
+                <div key={i} className={`rounded-[24px] border ${stage.borderColor} bg-white p-4`}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${stage.badgeColor} text-xs font-bold text-white`}>{i + 1}</span>
+                    <span className={`text-sm font-semibold ${stage.titleColor}`}>{stage.title}</span>
+                  </div>
+                  <p className="text-sm leading-relaxed text-slate-500">
+                    <strong className="text-slate-800">{stage.label}</strong> {stage.description}
+                  </p>
                 </div>
-                <p className="text-sm leading-relaxed text-slate-500">
-                  <strong className="text-slate-800">This tool.</strong> Census demographics, competitor presence,
-                  income levels, and family density. Indicates whether local conditions can support continued operation.
-                </p>
-              </div>
-              <div className="rounded-[24px] border border-yellow-200 bg-white p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-yellow-500 text-xs font-bold text-white">2</span>
-                  <span className="text-sm font-semibold text-yellow-800">Institutional Economics</span>
-                </div>
-                <p className="text-sm leading-relaxed text-slate-500">
-                  <strong className="text-slate-800">Next step.</strong> Enrollment sustainability, tuition discount
-                  rate, operating margin, subsidy dependency, and mission fit for ongoing operations.
-                </p>
-              </div>
-              <div className="rounded-[24px] border border-blue-200 bg-white p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">3</span>
-                  <span className="text-sm font-semibold text-blue-800">Local Validation</span>
-                </div>
-                <p className="text-sm leading-relaxed text-slate-500">
-                  <strong className="text-slate-800">Before committing.</strong> Sponsor and community engagement,
-                  feeder-school outreach, parent demand surveys, diocesan alignment, and local listening sessions.
-                </p>
-              </div>
+              ))}
             </div>
           </div>
         </details>
