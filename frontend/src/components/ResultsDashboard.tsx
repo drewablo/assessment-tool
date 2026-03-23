@@ -113,7 +113,7 @@ export default function ResultsDashboard({ result, request, onReset, onRerun }: 
   const w = result.feasibility_score;
 
   const dataAgeWarning = result.data_freshness?.sources?.some(
-    (s) => s.freshness_hours != null && s.freshness_hours > 8760,
+    (s) => s.freshness_hours != null && s.freshness_hours > 2160,
   );
 
   const oldestSource = result.data_freshness?.sources?.reduce<

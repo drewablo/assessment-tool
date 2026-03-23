@@ -12,10 +12,12 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://feasibility:feasibility@localhost:5432/feasibility",
-)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL environment variable is required. "
+        "Example: postgresql+asyncpg://user:pass@localhost:5432/feasibility"
+    )
 
 engine = create_async_engine(
     DATABASE_URL,

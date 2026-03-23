@@ -250,7 +250,7 @@ def _score_elder_care(demographics: dict, facilities: List[dict], mission_mode: 
         income = piecewise_linear(median_income, [(20_000, 10), (35_000, 24), (54_000, 52), (75_000, 74), (100_000, 90), (140_000, 97)])
 
     weighted_beds = sum(_facility_beds(f) * decay_weight(f["distance_miles"]) for f in facilities)
-    saturation_ratio = weighted_beds / target_pop if target_pop > 0 else 1
+    saturation_ratio = weighted_beds / target_pop if target_pop > 0 else 0
     competition = piecewise_linear(saturation_ratio, [(0.0, 96), (0.2, 85), (0.4, 66), (0.8, 42), (1.0, 30), (1.4, 14)])
 
     seniors_65_plus = demographics.get("seniors_65_plus") or 0

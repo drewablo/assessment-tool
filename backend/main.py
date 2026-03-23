@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from models.schemas import (
     AnalysisRequest,
@@ -911,12 +914,16 @@ async def lifespan(app: FastAPI):
         yield
 
 
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+
 app = FastAPI(
     title="Ministry Feasibility API",
     description="Market feasibility analysis for schools, housing, and elder care using Census and ministry-specific data.",
     version="2.0.0",
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "")
@@ -925,9 +932,22 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL, "http://localhost:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Add standard security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 
 @app.middleware("http")
@@ -1288,10 +1308,15 @@ async def extract_school_stage2_audits(files: list[UploadFile] = File(...)):
 
     rows = []
     warnings = []
+    MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB per file
     for i, uploaded in enumerate(files):
         if not uploaded.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {uploaded.filename}")
+            raise HTTPException(status_code=400, detail=f"Unsupported file type for file #{i + 1}.")
         payload = await uploaded.read()
+        if len(payload) > MAX_PDF_SIZE:
+            raise HTTPException(status_code=400, detail=f"File #{i + 1} exceeds 10 MB limit.")
+        if not payload[:5].startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail=f"File #{i + 1} is not a valid PDF.")
         extracted = extract_audit_financials(payload, uploaded.filename, i)
         rows.extend(extracted["rows"])
         warnings.extend(extracted.get("warnings", []))
@@ -1544,7 +1569,7 @@ async def get_history_record(record_id: int):
 
 
 @app.delete("/api/history/{record_id}", status_code=204)
-async def delete_history_record(record_id: int):
+async def delete_history_record(record_id: int, request: Request):
     """Delete a single analysis record. Requires USE_DB=true."""
     if not USE_DB:
         raise HTTPException(status_code=501, detail="Database not enabled. Set USE_DB=true.")
@@ -1552,6 +1577,9 @@ async def delete_history_record(record_id: int):
     from db.connection import get_session
     from db.models import AnalysisRecord
     from sqlalchemy import select, delete
+
+    client_ip = request.headers.get("X-Real-IP", request.client.host if request.client else "unknown")
+    logger.info("DELETE /api/history/%d requested from %s", record_id, client_ip)
 
     async with get_session() as session:
         result = await session.execute(delete(AnalysisRecord).where(AnalysisRecord.id == record_id))
