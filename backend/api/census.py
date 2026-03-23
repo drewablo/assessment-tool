@@ -310,7 +310,8 @@ async def _get_tracts_in_radius(
     Returns list of dicts with geoid, state, county, tract fields.
     """
     lat_buffer = radius_miles / 69.0
-    lon_buffer = radius_miles / (69.0 * math.cos(math.radians(lat)))
+    clamped_lat = max(-89.0, min(89.0, lat))
+    lon_buffer = radius_miles / (69.0 * math.cos(math.radians(clamped_lat)))
 
     xmin = lon - lon_buffer
     ymin = lat - lat_buffer

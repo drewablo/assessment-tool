@@ -239,7 +239,7 @@ def _score_housing(
     else:
         # Standard LIHTC-based competition scoring
         weighted_units = sum((p.get("li_units") or 50) * decay_weight(p["distance_miles"]) for p in projects)
-        sat_ratio = weighted_units / cost_burdened if cost_burdened > 0 else 1
+        sat_ratio = weighted_units / cost_burdened if cost_burdened > 0 else 0
         competition = piecewise_linear(sat_ratio, [(0.0, 96), (0.2, 80), (0.4, 62), (0.8, 40), (1.0, 28), (1.4, 12)])
 
     hud_market_boost = 0.0

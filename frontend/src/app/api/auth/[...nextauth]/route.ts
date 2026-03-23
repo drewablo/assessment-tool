@@ -2,8 +2,12 @@ export const dynamic = "force-dynamic";
 
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import { compareSync } from "bcryptjs";
 
 // Parse AUTH_USERS="alice:pass1,bob:pass2" into a lookup map.
+// Supports both plain-text and bcrypt-hashed passwords.
+// To use hashed passwords: AUTH_USERS="alice:$2b$10$hash...,bob:$2b$10$hash..."
+// Generate hashes with: node -e "console.log(require('bcryptjs').hashSync('mypass', 10))"
 const userMap = new Map<string, string>(
   (process.env.AUTH_USERS || "")
     .split(",")
@@ -16,6 +20,10 @@ const userMap = new Map<string, string>(
     })
 );
 
+function isBcryptHash(value: string): boolean {
+  return /^\$2[aby]\$\d{2}\$.{53}$/.test(value);
+}
+
 const handler = NextAuth({
   providers: [
     CredentialsProvider({
@@ -27,7 +35,13 @@ const handler = NextAuth({
       async authorize(credentials) {
         const { username = "", password = "" } = credentials ?? {};
         const stored = userMap.get(username);
-        if (stored && stored === password) {
+        if (!stored) return null;
+
+        const match = isBcryptHash(stored)
+          ? compareSync(password, stored)
+          : stored === password;
+
+        if (match) {
           return { id: username, name: username };
         }
         return null;
